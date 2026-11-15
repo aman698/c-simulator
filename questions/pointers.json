@@ -1,0 +1,67 @@
+[
+  {
+    "id": "PTR-M-01",
+    "topic": "Pointers",
+    "difficulty": "Medium",
+    "type": "FUNCTION",
+    "title": "Implement my_memmove (Overlap-Safe Copy)",
+    "tags": [
+      "embedded",
+      "memmove",
+      "pointer-arithmetic",
+      "void-pointer",
+      "asked-in-automotive"
+    ],
+    "statement_md": "Implement\n\n```c\nvoid *my_memmove(void *dst, const void *src, size_t n);\n```\n\nIt copies `n` bytes from `src` to `dst` and returns `dst`. Unlike `memcpy`, the two regions **may overlap**, and the result must be as if the bytes were first copied to a temporary buffer.\n\nYou may **not** use `memmove`, `memcpy`, or a temporary buffer. In bootloaders and BSP code you often have no libc, and an O(n) scratch buffer is not available.\n\n**How it is tested.** A hidden `main()` reads a buffer and a list of moves, calls your function on the buffer for each move, and prints the buffer after every call. It also checks that you return `dst` and that you never write outside the buffer.\n\n**Input (read by the hidden harness)**\n- Line 1: the initial buffer contents `s` (no spaces) and the number of operations `q`.\n- Next `q` lines: `dst src n`, meaning `my_memmove(buf + dst, buf + src, n)`.\n\n**Output**\n- After each operation, one line with the current buffer contents.\n\n**Example**\n```\nInput:\nabcdefghij 2\n2 0 5\n0 3 4\n\nOutput:\nababcdehij\nbcdecdehij\n```",
+    "constraints_md": "- `1 <= strlen(s) <= 40`, `1 <= q <= 20`\n- `0 <= dst, src` and `dst + n <= strlen(s)`, `src + n <= strlen(s)` (always in bounds)\n- `n` may be `0`; `dst` may equal `src`.\n- Do not use any `<string.h>` copy function.",
+    "starter_code": "#include <stddef.h>\n\n/*\n * Copy n bytes from src to dst; the regions may overlap.\n * Return dst. Do NOT use memmove/memcpy or a temporary buffer.\n */\nvoid *my_memmove(void *dst, const void *src, size_t n)\n{\n    /* TODO */\n    return dst;\n}\n",
+    "harness_code": "#include <stdio.h>\n#include <string.h>\n#include <stddef.h>\n\n#define memmove(d, s, n) memmove_is_not_allowed_in_this_exercise\n#define memcpy(d, s, n) memcpy_is_not_allowed_in_this_exercise\n\n/*USER_CODE*/\n\n#undef memmove\n#undef memcpy\n\n#define GUARD 16\n#define CANARY 0xA5\n\nint main(void)\n{\n    unsigned char arena[GUARD + 41 + GUARD];\n    char init[64];\n    int q;\n    if (scanf(\"%63s %d\", init, &q) != 2) return 0;\n    size_t len = strlen(init);\n    memset(arena, CANARY, sizeof arena);\n    unsigned char *buf = arena + GUARD;\n    memcpy(buf, init, len);\n    for (int i = 0; i < q; i++) {\n        int d, s, n;\n        if (scanf(\"%d %d %d\", &d, &s, &n) != 3) return 0;\n        void *ret = my_memmove(buf + d, buf + s, (size_t)n);\n        if (ret != (void *)(buf + d)) printf(\"BAD RETURN VALUE\\n\");\n        for (size_t k = 0; k < GUARD; k++) {\n            if (arena[k] != CANARY || buf[len + k] != CANARY) {\n                printf(\"OUT OF BOUNDS WRITE\\n\");\n                return 0;\n            }\n        }\n        printf(\"%.*s\\n\", (int)len, (const char *)buf);\n    }\n    return 0;\n}\n",
+    "sample_tests": [
+      {
+        "input": "abcdefghij 2\n2 0 5\n0 3 4\n",
+        "output": "ababcdehij\nbcdecdehij\n"
+      },
+      {
+        "input": "hello 1\n0 0 5\n",
+        "output": "hello\n"
+      }
+    ],
+    "hidden_tests": [
+      {
+        "input": "abcdefghij 1\n0 2 8\n",
+        "output": "cdefghijij\n"
+      },
+      {
+        "input": "abcdefghij 1\n2 0 8\n",
+        "output": "ababcdefgh\n"
+      },
+      {
+        "input": "abcdefghij 2\n5 5 0\n0 9 0\n",
+        "output": "abcdefghij\nabcdefghij\n"
+      },
+      {
+        "input": "x 1\n0 0 1\n",
+        "output": "x\n"
+      },
+      {
+        "input": "0123456789ABCDEF 3\n8 0 8\n1 0 15\n0 1 15\n",
+        "output": "0123456701234567\n0012345670123456\n0123456701234566\n"
+      },
+      {
+        "input": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn 2\n1 0 39\n0 1 39\n",
+        "output": "AABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklm\nABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmm\n"
+      },
+      {
+        "input": "abcdef 3\n0 3 3\n3 0 3\n1 2 1\n",
+        "output": "defdef\ndefdef\ndffdef\n"
+      }
+    ],
+    "predict_answer": "",
+    "hints": [
+      "If `dst` is **before** `src`, copying front-to-back is safe. Each source byte is read before it can be overwritten.",
+      "If `dst` is **after** `src` and the regions overlap, copy **back-to-front**: start at `src + n - 1` and `dst + n - 1` and walk down."
+    ],
+    "solution_code": "#include <stddef.h>\n\nvoid *my_memmove(void *dst, const void *src, size_t n)\n{\n    unsigned char *d = dst;\n    const unsigned char *s = src;\n\n    if (d == s || n == 0)\n        return dst;\n\n    if (d < s) {\n        /* destination below source: forward copy never clobbers unread bytes */\n        while (n--)\n            *d++ = *s++;\n    } else {\n        /* destination above source: copy from the end backwards */\n        d += n;\n        s += n;\n        while (n--)\n            *--d = *--s;\n    }\n    return dst;\n}\n",
+    "explanation_md": "**Approach.** The danger is reading a source byte that you have already overwritten. That only happens when `dst` lies inside `(src, src + n)`. In that case, copy from the end towards the start. Otherwise a plain forward copy is correct.\n\n```\nsrc: [a b c d e] f g        dst = src + 2, n = 5\nforward copy:  a b a b a b a   <- wrong, re-reads copied bytes\nbackward copy: a b a b c d e   <- correct\n```\n\nWork on `unsigned char *`. You cannot do arithmetic on `void *` in standard C (GCC allows it only as an extension), and `char` may be signed.\n\n**Complexity.** Time O(n), space O(1).\n\n**Common mistakes**\n- Forward copy in all cases. It passes non-overlapping tests and corrupts data when `dst > src` and the regions overlap.\n- Arithmetic on `void *` (`dst + 1`). This is a GCC extension, not ISO C, and MISRA-C forbids it.\n- Forgetting to return `dst`, or returning the advanced pointer `d`.\n- Using a temporary buffer (a VLA or `malloc`), which is not allowed on stack-constrained targets.\n\n**Interview follow-ups**\n- Strictly speaking, comparing pointers to *different* objects with `<` is undefined. How would you make the overlap test fully portable? (Cast to `uintptr_t`.)\n- Speed it up by copying 4 or 8 bytes per iteration once both pointers are word-aligned. What alignment pitfalls exist on Cortex-M0, which has no unaligned access?\n- Why must the copy loop for a DMA descriptor or a memory-mapped FIFO use `volatile` pointers, and why can't you call this function on peripheral registers?\n- How does `memmove` differ from `memcpy` in the standard? (`memcpy` with overlapping regions is undefined behavior.)"
+  }
+]

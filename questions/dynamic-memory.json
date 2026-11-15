@@ -1,0 +1,58 @@
+[
+  {
+    "id": "MEM-E-01",
+    "topic": "Dynamic Memory",
+    "difficulty": "Easy",
+    "type": "FIND_THE_BUG",
+    "title": "Word Reverser That Leaks Every Word",
+    "tags": [
+      "memory-leak",
+      "malloc",
+      "free",
+      "array-of-pointers"
+    ],
+    "statement_md": "The program below reads `n` words, stores a heap copy of each one in an array of `char *`, and prints the words in **reverse** order, one per line.\n\nThe output is correct, but the judge reports **Memory Leak** for every non-empty input. LeakSanitizer is always on for this topic.\n\nFind and fix the bug so that every test passes with **no leaks**. Do not change the output format.\n\n**Input**\n- Line 1: `n`.\n- Line 2: `n` words (each at most 63 characters, no spaces).\n\n**Output**\n- The words in reverse order, one per line. Print nothing when `n = 0`.",
+    "constraints_md": "- `0 <= n <= 1000`\n- Every block obtained from `malloc` must be released before `main` returns.",
+    "starter_code": "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\nstatic char *dup_word(const char *w)\n{\n    size_t len = strlen(w);\n    char *p = malloc(len + 1);\n    if (!p) return NULL;\n    memcpy(p, w, len + 1);\n    return p;\n}\n\nint main(void)\n{\n    int n;\n    if (scanf(\"%d\", &n) != 1 || n <= 0) return 0;\n\n    char **words = malloc((size_t)n * sizeof *words);\n    if (!words) return 1;\n\n    char buf[64];\n    for (int i = 0; i < n; i++) {\n        if (scanf(\"%63s\", buf) != 1) { n = i; break; }\n        words[i] = dup_word(buf);\n    }\n\n    for (int i = n - 1; i >= 0; i--)\n        printf(\"%s\\n\", words[i]);\n\n    free(words);\n    return 0;\n}\n",
+    "harness_code": "",
+    "sample_tests": [
+      {
+        "input": "3\ncan lin flexray\n",
+        "output": "flexray\nlin\ncan\n"
+      },
+      {
+        "input": "0\n",
+        "output": ""
+      }
+    ],
+    "hidden_tests": [
+      {
+        "input": "1\necu\n",
+        "output": "ecu\n"
+      },
+      {
+        "input": "5\na bb ccc dddd eeeee\n",
+        "output": "eeeee\ndddd\nccc\nbb\na\n"
+      },
+      {
+        "input": "4\nsame same same same\n",
+        "output": "same\nsame\nsame\nsame\n"
+      },
+      {
+        "input": "2\nabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk x\n",
+        "output": "x\nabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijk\n"
+      },
+      {
+        "input": "6\nignition acc on crank run off\n",
+        "output": "off\nrun\ncrank\non\nacc\nignition\n"
+      }
+    ],
+    "predict_answer": "",
+    "hints": [
+      "Count the `malloc` calls. There is one for the array and one **per word**. Now count the `free` calls.",
+      "Freeing the array of pointers does not free what the pointers point to. Free every `words[i]` before you free `words`."
+    ],
+    "solution_code": "#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\nstatic char *dup_word(const char *w)\n{\n    size_t len = strlen(w);\n    char *p = malloc(len + 1);\n    if (!p) return NULL;\n    memcpy(p, w, len + 1);\n    return p;\n}\n\nint main(void)\n{\n    int n;\n    if (scanf(\"%d\", &n) != 1 || n <= 0) return 0;\n\n    char **words = malloc((size_t)n * sizeof *words);\n    if (!words) return 1;\n\n    char buf[64];\n    for (int i = 0; i < n; i++) {\n        if (scanf(\"%63s\", buf) != 1) { n = i; break; }\n        words[i] = dup_word(buf);\n    }\n\n    for (int i = n - 1; i >= 0; i--)\n        printf(\"%s\\n\", words[i]);\n\n    for (int i = 0; i < n; i++)   /* FIX: release every word ... */\n        free(words[i]);\n    free(words);                  /* ... then the array that held them */\n    return 0;\n}\n",
+    "explanation_md": "**Bug.** The program makes `n + 1` allocations (one array plus one copy per word) but only one `free`. `free(words)` releases the array of pointers, not the strings those pointers refer to. Once `words` is freed, nothing references the strings, and LeakSanitizer reports them as *direct leaks*.\n\n**Fix.** Free in reverse order of ownership: first each `words[i]`, then `words`. Freeing `words` first and then reading `words[i]` would be a use-after-free.\n\n**Complexity.** Time O(total characters), space O(total characters). The fix adds an O(n) loop.\n\n**Common mistakes**\n- Freeing `words` first and then looping over `words[i]` (use-after-free).\n- Freeing only `words[0]` or using `<` versus `<=` wrongly in the free loop (partial leak).\n- Thinking \"the OS reclaims memory at exit, so leaks don't matter\". In an ECU, `main` never returns. A leak in a periodic task drains the heap until the first `malloc` failure, often hours into a test drive.\n\n**Interview follow-ups**\n- How does LeakSanitizer decide that a block is *leaked* (unreachable) rather than *still reachable*?\n- Restructure this to make one allocation total (a single block holding the pointer array and all characters), so cleanup is one `free`.\n- Why do MISRA C (Rule 21.3) and many automotive coding standards ban `malloc`/`free` after initialization, and what replaces them? (Static pools, fixed-block allocators.)"
+  }
+]

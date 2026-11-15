@@ -1,0 +1,29 @@
+[
+  {
+    "id": "STC-E-01",
+    "topic": "Structures",
+    "difficulty": "Easy",
+    "type": "PREDICT_OUTPUT",
+    "title": "Padding in a Telemetry Frame Struct",
+    "tags": [
+      "embedded",
+      "struct-padding",
+      "sizeof",
+      "offsetof",
+      "alignment"
+    ],
+    "statement_md": "What does this program print?\n\nAssume **x86-64 Linux, gcc, little-endian, `int` = 4 bytes, pointer = 8 bytes, `double` = 8 bytes with 8-byte alignment**.\n\n```c\n#include <stdio.h>\n#include <stddef.h>\n#include <stdint.h>\n\nstruct Frame {\n    char     tag;\n    int32_t  value;\n    char     flag;\n    double   scale;\n    uint16_t crc;\n};\n\nint main(void)\n{\n    printf(\"%zu %zu %zu\\n\",\n           sizeof(struct Frame),\n           offsetof(struct Frame, scale),\n           offsetof(struct Frame, crc));\n    return 0;\n}\n```\n\nType the exact output, or choose **Undefined Behavior** / **Compile Error**.",
+    "constraints_md": "- Platform: x86-64, gcc, System V ABI (natural alignment: `int32_t` 4, `double` 8, `uint16_t` 2).",
+    "starter_code": "#include <stdio.h>\n#include <stddef.h>\n#include <stdint.h>\n\nstruct Frame {\n    char     tag;\n    int32_t  value;\n    char     flag;\n    double   scale;\n    uint16_t crc;\n};\n\nint main(void)\n{\n    printf(\"%zu %zu %zu\\n\",\n           sizeof(struct Frame),\n           offsetof(struct Frame, scale),\n           offsetof(struct Frame, crc));\n    return 0;\n}\n",
+    "harness_code": "",
+    "sample_tests": [],
+    "hidden_tests": [],
+    "predict_answer": "32 16 24",
+    "hints": [
+      "Each member starts at an offset that is a multiple of its own alignment. The compiler inserts padding bytes to make that true.",
+      "The total size is rounded up to a multiple of the **largest** member alignment (8 here), so arrays of the struct stay aligned."
+    ],
+    "solution_code": "#include <stdio.h>\n#include <stddef.h>\n#include <stdint.h>\n\n/* Layout (offset: member)\n *  0: tag      (1)  + 3 padding\n *  4: value    (4)\n *  8: flag     (1)  + 7 padding  -> double needs an 8-aligned offset\n * 16: scale    (8)\n * 24: crc      (2)  + 6 tail padding -> size rounded up to 8\n * sizeof = 32\n *\n * Reordered largest-first (double, int32_t, uint16_t, char, char) it is 16 bytes.\n */\nstruct Frame {\n    char     tag;\n    int32_t  value;\n    char     flag;\n    double   scale;\n    uint16_t crc;\n};\n\nint main(void)\n{\n    printf(\"%zu %zu %zu\\n\",\n           sizeof(struct Frame),\n           offsetof(struct Frame, scale),\n           offsetof(struct Frame, crc));\n    return 0;\n}\n",
+    "explanation_md": "**Answer: `32 16 24`**\n\n| offset | member | size | padding after |\n|---|---|---|---|\n| 0 | `tag` | 1 | 3 (to align `int32_t` at 4) |\n| 4 | `value` | 4 | 0 |\n| 8 | `flag` | 1 | 7 (to align `double` at 16) |\n| 16 | `scale` | 8 | 0 |\n| 24 | `crc` | 2 | 6 tail padding (size must be a multiple of 8) |\n\nThe raw data is only 16 bytes; half of the 32-byte struct is padding. Reordering members **largest-first** (`double`, `int32_t`, `uint16_t`, `char`, `char`) gives `sizeof == 16`.\n\n**Complexity.** N/A. Padding is fixed at compile time and costs no CPU time, but it wastes RAM and bus bandwidth (for example in CAN/Ethernet frame buffers or NVM records).\n\n**Common mistakes**\n- Adding up member sizes (1+4+1+8+2 = 16) and forgetting padding.\n- Forgetting **tail padding**. Without it, `struct Frame arr[2]` would misalign `arr[1].scale`.\n- Assuming the layout is the same on every target. On 32-bit x86 Linux, `double` inside a struct is only 4-byte aligned, which gives a different size.\n\n**Interview follow-ups**\n- What does `__attribute__((packed))` do to this struct, and why can taking `&frame.value` in a packed struct crash on a Cortex-M0?\n- Why should you never `memcpy` a struct directly into a CAN payload or a file, even if the sizes match? (Padding, endianness, ABI differences.)\n- How would you add a compile-time check that a struct stays exactly 16 bytes? (`_Static_assert(sizeof(struct X) == 16, \"...\")`)"
+  }
+]
