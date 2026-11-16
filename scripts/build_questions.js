@@ -13,15 +13,25 @@ import { readQuestionFile } from './lib/qformat.js';
 const quiet = process.argv.includes('--quiet');
 const ORDER = { Easy: 0, Medium: 1, Hard: 2 };
 
-export function loadTopicSources(topic) {
+/**
+ * Parse every .q file of a topic. With `onError`, unparsable files are reported and
+ * skipped (dev server); without it the first parse error throws (validator, --strict).
+ */
+export function loadTopicSources(topic, onError = null) {
   const dir = path.join(QUESTIONS_SRC_DIR, topic.slug);
   if (!fs.existsSync(dir)) return null;
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.q')).sort();
-  const qs = files.map((f) => {
-    const q = readQuestionFile(path.join(dir, f));
-    q.__file = path.join(dir, f);
-    return q;
-  });
+  const qs = [];
+  for (const f of files) {
+    try {
+      const q = readQuestionFile(path.join(dir, f));
+      q.__file = path.join(dir, f);
+      qs.push(q);
+    } catch (err) {
+      if (!onError) throw err;
+      onError(err);
+    }
+  }
   qs.sort((a, b) => ORDER[a.difficulty] - ORDER[b.difficulty] || a.id.localeCompare(b.id));
   return qs;
 }
@@ -45,12 +55,20 @@ function main() {
   fs.mkdirSync(QUESTIONS_DIR, { recursive: true });
   const ti = process.argv.indexOf('--topic');
   const only = ti >= 0 ? process.argv[ti + 1] : null;
+  const strict = process.argv.includes('--strict');
   let total = 0;
   let failed = false;
   for (const topic of TOPICS.filter((t) => !only || t.slug === only)) {
     let qs;
     try {
-      qs = loadTopicSources(topic);
+      qs = loadTopicSources(
+        topic,
+        strict
+          ? null
+          : (err) => {
+              console.warn(`WARNING (skipped): ${err.message}`);
+            },
+      );
     } catch (err) {
       console.error(`ERROR (${topic.slug}): ${err.message}`);
       failed = true;
@@ -74,7 +92,7 @@ function main() {
     if (!quiet) console.log(`  ${topic.slug.padEnd(18)} ${String(clean.length).padStart(3)} questions`);
   }
   if (!quiet) console.log(`Built ${total} questions into ${path.relative(process.cwd(), QUESTIONS_DIR) || QUESTIONS_DIR}/`);
-  if (failed) process.exit(1);
+  if (failed && strict) process.exit(1);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) main();

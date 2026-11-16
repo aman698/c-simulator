@@ -5,13 +5,13 @@
   "description": "LeetCode-style C programming practice simulator for embedded/automotive interview preparation, with a real gcc judge.",
   "type": "module",
   "scripts": {
-    "dev": "npm run build:questions && concurrently -k -n judge,web -c cyan,magenta \"node server/index.js\" \"vite\"",
+    "dev": "node scripts/build_questions.js --quiet && concurrently -k -n judge,web -c cyan,magenta \"node server/index.js\" \"vite\"",
     "server": "node server/index.js",
     "web": "vite",
     "build": "npm run build:questions && tsc -p client/tsconfig.json --noEmit && vite build",
     "start": "npm run build && node server/index.js --serve",
     "build:questions": "node scripts/build_questions.js",
-    "validate": "node scripts/build_questions.js && node scripts/validate_questions.js",
+    "validate": "node scripts/build_questions.js --strict && node scripts/validate_questions.js",
     "q": "node scripts/qtool.js",
     "typecheck": "tsc -p client/tsconfig.json --noEmit"
   },

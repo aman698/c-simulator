@@ -309,6 +309,11 @@ function runProgramNative(tc, dir, input, plan, timeLimitMs) {
 
 // ---------------------------------------------------------------- docker execution
 
+/** On Linux hosts run the container as the current user so files in the temp dir stay deletable. */
+function dockerUserArgs() {
+  return typeof process.getuid === 'function' ? ['--user', `${process.getuid()}:${process.getgid()}`] : [];
+}
+
 function shQuote(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
@@ -341,7 +346,7 @@ done
     'docker',
     [
       'run', '--rm', '--network', 'none', '--memory', '128m', '--memory-swap', '128m', '--pids-limit', '64',
-      '--cpus', '1', '--cap-add', 'SYS_PTRACE', '-v', `${dir}:/work`, '-w', '/work', DOCKER_IMAGE, 'sh', 'run.sh',
+      '--cpus', '1', '--cap-add', 'SYS_PTRACE', ...dockerUserArgs(), '-v', `${dir}:/work`, '-w', '/work', DOCKER_IMAGE, 'sh', 'run.sh',
     ],
     { timeoutMs: 60000 + inputs.length * (timeLimitMs + 1500) },
   );

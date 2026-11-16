@@ -125,7 +125,7 @@ export function DashboardPage() {
           <Tile
             label="Current streak"
             value={`${progress?.streak.current ?? 0} day${progress?.streak.current === 1 ? '' : 's'}`}
-            sub={`Longest: ${progress?.streak.longest ?? 0} days`}
+            sub={`Longest: ${progress?.streak.longest ?? 0} day${progress?.streak.longest === 1 ? '' : 's'}`}
           />
           <Tile
             label="Submissions"
