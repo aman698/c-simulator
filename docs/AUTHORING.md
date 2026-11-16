@@ -158,6 +158,11 @@ identically on Linux and Windows):
   `strcasecmp`, `itoa`, `M_PI`, `ssize_t`, `typeof` (use `__typeof__`), `unistd.h`, `sys/*`, ...
 - No `rand`/`srand`/`time`/`clock`, no `%p`, no `wchar_t`, no `aligned_alloc`, no `fflush(stdin)`.
 - Big arrays: make them `static` (Windows default stack is 1 MB); keep locals under ~64 KB.
+- Never name a struct member, function pointer or local function `malloc`, `calloc`, `realloc` or
+  `free` (e.g. an allocator "vtable" with a `.free` member): the Windows heap checker defines these
+  as function-like macros. Use `alloc_fn` / `free_fn` etc.
+- `Compile Error` predict snippets must be hard errors in **both** gcc and clang (check both passes);
+  e.g. assigning to a `const` object, a missing declaration, a `break` outside a loop/switch.
 - Bit-field layout is forced to the Linux (SysV) layout on MinGW (`-mno-ms-bitfields`).
 - `char` is signed on x86-64; right shift of a negative `int` is arithmetic in gcc (impl.-defined).
 
@@ -185,5 +190,6 @@ npm run q -- check questions_src/pointers/PTR-H-03.q  # validate one file, verbo
 npm run q -- run PTR-H-03 --input "3\n1 2 3"           # run the solution on ad-hoc input
 npm run validate -- --topic pointers                   # whole topic + bank rules (gcc)
 npm run validate -- --topic pointers --cc clang        # Windows only: ASan/UBSan pass
+node scripts/validate_questions.js --src --topic pointers   # validate straight from .q sources
 npm run validate                                       # everything -> "240/240 questions valid"
 ```

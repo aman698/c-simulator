@@ -26,11 +26,28 @@ export function loadTopicSources(topic) {
   return qs;
 }
 
+/** Write via temp file + rename so concurrent readers never see a half-written JSON file. */
+function writeAtomic(file, text) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, text);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(tmp, file);
+      return;
+    } catch (err) {
+      if (attempt >= 20 || !['EPERM', 'EBUSY', 'EACCES'].includes(err.code)) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50); // Windows: reader holds the file
+    }
+  }
+}
+
 function main() {
   fs.mkdirSync(QUESTIONS_DIR, { recursive: true });
+  const ti = process.argv.indexOf('--topic');
+  const only = ti >= 0 ? process.argv[ti + 1] : null;
   let total = 0;
   let failed = false;
-  for (const topic of TOPICS) {
+  for (const topic of TOPICS.filter((t) => !only || t.slug === only)) {
     let qs;
     try {
       qs = loadTopicSources(topic);
@@ -52,7 +69,7 @@ function main() {
       }
     }
     const clean = qs.map(({ __file, ...q }) => q);
-    fs.writeFileSync(path.join(QUESTIONS_DIR, `${topic.slug}.json`), `${JSON.stringify(clean, null, 2)}\n`);
+    writeAtomic(path.join(QUESTIONS_DIR, `${topic.slug}.json`), `${JSON.stringify(clean, null, 2)}\n`);
     total += clean.length;
     if (!quiet) console.log(`  ${topic.slug.padEnd(18)} ${String(clean.length).padStart(3)} questions`);
   }

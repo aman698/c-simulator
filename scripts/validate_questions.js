@@ -18,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { QUESTIONS_DIR } from '../server/paths.js';
 import { applyCcOption } from './lib/cc.js';
+import { loadTopicSources } from './build_questions.js';
 import { TOPICS, topicBySlug } from '../server/topics.js';
 import { getToolchain, describeSanitizers } from '../server/judge/toolchain.js';
 import { buildCompilePlan } from '../server/judge/judge.js';
@@ -38,9 +39,18 @@ process.env.JUDGE_PARALLEL ||= String(jobs);
 // (gcc is the reference compiler for the zero-warning rule).
 applyCcOption(argv);
 
-function loadBank() {
+// --src: read questions_src/*.q directly instead of the built JSON (safe while other
+// processes rebuild questions/*.json concurrently).
+const fromSrc = argv.includes('--src');
+
+function loadBank(topics) {
   const all = [];
-  for (const t of TOPICS) {
+  for (const t of topics) {
+    if (fromSrc) {
+      const qs = loadTopicSources(t);
+      if (qs) all.push(...qs.map(({ __file, ...q }) => q));
+      continue;
+    }
     const file = path.join(QUESTIONS_DIR, `${t.slug}.json`);
     if (!fs.existsSync(file)) continue;
     all.push(...JSON.parse(fs.readFileSync(file, 'utf8')));
@@ -75,11 +85,6 @@ async function main() {
   console.log(`  command   : ${plan.display}`);
   console.log('');
 
-  let bank = loadBank();
-  if (bank.length === 0) {
-    console.error('No questions found. Run `npm run build:questions` first.');
-    process.exit(2);
-  }
   let topics = TOPICS;
   if (topicFilter) {
     const t = topicBySlug(topicFilter);
@@ -88,7 +93,11 @@ async function main() {
       process.exit(2);
     }
     topics = [t];
-    bank = bank.filter((q) => q.topic === t.name);
+  }
+  let bank = loadBank(topics);
+  if (bank.length === 0) {
+    console.error('No questions found. Run `npm run build:questions` first.');
+    process.exit(2);
   }
   if (idFilter) bank = bank.filter((q) => q.id === idFilter);
 

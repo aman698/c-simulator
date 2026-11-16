@@ -1,0 +1,4 @@
+# Keep LF everywhere so the repo works unchanged in WSL/Linux (shell scripts, .q sources, JSON).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
