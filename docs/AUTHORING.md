@@ -89,6 +89,10 @@ Harness guidelines:
 - Print clear, deterministic results; for "in-place" APIs also verify pointer identity, return values.
 - Ban library shortcuts with macros placed before the marker and `#undef`-ed after it, e.g.
   `#define strlen(s) strlen_is_not_allowed_here` (the user then gets a compile error if they cheat).
+  Names that a header already defines as macros (`isnan`, `isinf`, `fpclassify` from `<math.h>`) must be
+  `#undef`-ed first, otherwise gcc warns "redefined" and the zero-warning rule fails.
+- The editor tooling may strip trailing whitespace from lines: if a test input needs a meaningful trailing
+  space, restructure the test (leading space, quotes, or an explicit length).
 - Guard buffers with canaries to report `OUT OF BOUNDS WRITE` instead of silently passing.
 - The harness itself must be warning-free, leak-free and UB-free.
 - To test large sizes without huge test files, let the harness **generate data** from a seed in the

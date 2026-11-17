@@ -193,7 +193,74 @@ data/                   your progress (progress.json, git-ignored)
 
 ## Decisions and assumptions
 
-<!-- DECISIONS -->
+The brief asked for sensible decisions to be made and recorded instead of asked. These are those decisions.
+
+**Stack and storage**
+- **Backend: Node.js + Express.** It keeps one language across the repo, and lets the validator import the exact
+  judge module the app uses (`server/judge/judge.js`). That guarantees the validator and the app agree.
+- **Progress: a local JSON file** (`data/progress.json`, atomic writes) instead of SQLite. This is a single-user
+  local app, and it avoids a native module build (node-gyp) on Windows.
+- **Question sources: `.q` text files.** `questions_src/*.q` are compiled into the strict-schema
+  `questions/<topic>.json`, and the JSON is committed. C code and Markdown inside JSON strings are unreadable
+  and error-prone to escape by hand.
+- **Schema extension.** `harness_code` is also allowed on FIND_THE_BUG questions. Some bugs (missing
+  `volatile`, a bug inside one driver function) are best tested through a hidden harness. For all other
+  types it stays empty, as the schema says.
+
+**Judge behaviour**
+- **Extra compiler flags:**
+  - `-lm` is always appended (needed for `<math.h>` on glibc).
+  - `-mno-ms-bitfields` is added on MinGW, so struct and bit-field layout matches Linux.
+- **Output comparison** ignores trailing spaces on each line and trailing blank lines. **Leading spaces count**,
+  so pattern alignment is still judged.
+- **Verdict order per test:** TLE → Runtime Error (signal, sanitizer report, or non-zero exit; `main` must return
+  0) → Wrong Answer → Memory Leak → Accepted. If the output is wrong *and* memory leaked, the verdict is Wrong
+  Answer and the leak is mentioned in the message.
+- **Leak checking:**
+  - With sanitizers ON, leaks fail tests in **every** topic. ASan on Linux enables LeakSanitizer by default,
+    and the Windows fallback is kept consistent with that.
+  - Dynamic Memory keeps leak checking on even with sanitizers OFF (via `-fsanitize=leak`, or the heap checker
+    where that is unavailable).
+- **Memory limit:**
+  - Without a sanitizer runtime: `ulimit -v` 256 MB.
+  - With ASan: `hard_rss_limit_mb=384` instead. ASan reserves terabytes of virtual address space, so `ulimit -v`
+    would break it.
+  - In Docker: `--memory=128m`.
+  - Native Windows: no memory limit.
+- **Time limit:** 2 s wall clock per test. The program's whole process group is killed on timeout.
+- **Hidden tests:** only the **first failing** hidden test shows its input and expected output (LeetCode style);
+  the others show only their verdict.
+- **Custom input:** the expected output is computed by running the reference solution on the same input.
+
+**Practice features**
+- **Solution unlock:** any judged attempt counts (Run or Submit). Only Submit and predict answers count towards
+  "solved", the streak and the submission history.
+- **Streak:** consecutive days with at least one submission. Today counts as soon as you submit, and the streak
+  survives until the day ends.
+- **Interview Mode:**
+  - It picks coding questions (CODE / FUNCTION / FIND_THE_BUG) when the chosen topics have them.
+  - Scoring is 20 / 30 / 50 points for Easy / Medium / Hard, with partial credit in proportion to the best
+    passed-test ratio.
+  - Hints, solutions and custom input are disabled during the interview. Predict-output answers are revealed
+    only after it ends.
+
+**Question bank**
+- **Portability rules:** the bank must behave identically on Linux and Windows, so `long`, POSIX-only
+  functions, `%p`, `rand` and `wchar_t` are not used. The validator lints for them.
+- **PREDICT_OUTPUT platform:** questions assume x86-64 Linux, gcc, little-endian, `int` = 4 bytes, pointer = 8
+  bytes, and say so in the statement.
+- **Expected outputs:**
+  - Short outputs were written by hand, and the validator cross-checks them against the reference solutions.
+  - Long outputs (patterns, big tests) were generated from the reference solution and then reviewed.
+  - Several string and protocol questions (NMEA, VIN, Base64, wildcard, AT parsing) were cross-checked
+    against independent JavaScript implementations.
+- **Large inputs:** big test sizes are produced inside the hidden harness from a seed (a deterministic LCG), so
+  the JSON stays small while O(n²) solutions still hit the time limit.
+
+**This build machine (Windows 10)**
+- **Toolchain:** the machine had no WSL distro, Docker, Node.js or gcc, and no admin rights for installing
+  WSL. So portable Node.js 24, MSYS2 gcc 16.2 and MSYS2 clang 23 (with the Windows ASan runtime) were installed
+  into the git-ignored `.toolchain/` folder. The judge finds that gcc automatically when none is on `PATH`.
 
 ## Troubleshooting
 
