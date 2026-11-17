@@ -1,0 +1,322 @@
+@@@ meta
+id: STR-M-05
+topic: Strings
+difficulty: Medium
+type: FUNCTION
+title: Hex String to Byte Array and Back (UDS Request Parser)
+tags: embedded, hex, byte-array, uint8-t, input-validation, uds, diagnostics
+@@@ statement_md
+A diagnostic tester lets the engineer type UDS requests as hex text, for example `"22F190"` for *ReadDataByIdentifier VIN*. Responses are shown as hex again. Implement both conversions:
+
+```c
+int  hex_to_bytes(const char *hex, uint8_t *out, size_t out_size);
+void bytes_to_hex(const uint8_t *in, size_t n, char *out);
+```
+
+**`hex_to_bytes`**
+- Every **two** hex digits form one byte, high nibble first: `"22F190"` -> `{0x22, 0xF1, 0x90}`.
+- Accept `0-9`, `a-f` and `A-F`. Anything else, including spaces and a `0x` prefix, is invalid.
+- Return the number of bytes written (`""` gives `0`).
+- Return **-1** if `hex` is `NULL`, its length is **odd**, it contains an invalid character, or the result needs more than `out_size` bytes.
+- **Never write beyond `out[out_size - 1]`**, not even when the input is invalid. After an error, the contents of `out[0..out_size-1]` do not matter.
+
+**`bytes_to_hex`**
+- Write `2*n` **uppercase** hex digits and a terminating `'\0'` to `out` (the caller provides `2*n + 1` bytes). For `n == 0`, `out` becomes `""`.
+
+**How it is tested.** A hidden `main()` runs commands against buffers with guard bytes, prints the results and reports `OUT OF BOUNDS WRITE` if a guard byte changes.
+
+**Input (read by the hidden harness)**
+- Line 1: `q`.
+- Next `q` lines, each one of:
+  - `H2B cap "hex"` or `H2B cap NULL` calls `hex_to_bytes(hex, out, cap)` and prints `ret=N [b0 b1 ...]` (bytes in `%02X` format), or `ret=-1`.
+  - `B2H n v1 v2 ... vn` (decimal byte values) calls `bytes_to_hex` and prints `[HEX]`.
+
+**Example**
+```
+Input:
+3
+H2B 8 "22F190"
+H2B 8 "deadBEEF"
+B2H 4 0 1 254 255
+
+Output:
+ret=3 [22 F1 90]
+ret=4 [DE AD BE EF]
+[0001FEFF]
+```
+@@@ constraints_md
+- `1 <= q <= 20`; hex strings have at most 4000 characters; `0 <= cap <= 2048`; `0 <= n <= 256`.
+- Do not use `sscanf`, `strtol`, `strtoul`, `sprintf` or `snprintf` (rejected at compile time).
+- O(n) time, O(1) extra space.
+@@@ starter_code
+#include <stddef.h>
+#include <stdint.h>
+
+int hex_to_bytes(const char *hex, uint8_t *out, size_t out_size)
+{
+    /* TODO */
+    return -1;
+}
+
+void bytes_to_hex(const uint8_t *in, size_t n, char *out)
+{
+    /* TODO */
+    out[0] = '\0';
+}
+@@@ harness_code
+#include <stdio.h>
+#include <string.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#define sscanf(...) sscanf_is_not_allowed_in_this_exercise
+#define strtol(s, e, b) strtol_is_not_allowed_in_this_exercise
+#define strtoul(s, e, b) strtoul_is_not_allowed_in_this_exercise
+#define sprintf(...) sprintf_is_not_allowed_in_this_exercise
+#define snprintf(...) snprintf_is_not_allowed_in_this_exercise
+
+/*USER_CODE*/
+
+#undef sscanf
+#undef strtol
+#undef strtoul
+#undef sprintf
+#undef snprintf
+
+#define GUARD 16
+#define CANARY 0xA5
+#define MAXBUF 4200
+
+static unsigned char arena[GUARD + MAXBUF + GUARD];
+static char line[8300];
+
+static int guards_ok(size_t cap)
+{
+    for (size_t k = 0; k < GUARD; k++)
+        if (arena[k] != CANARY || arena[GUARD + cap + k] != CANARY)
+            return 0;
+    return 1;
+}
+
+int main(void)
+{
+    int q;
+    if (!fgets(line, sizeof line, stdin) || sscanf(line, "%d", &q) != 1) return 0;
+    for (int i = 0; i < q; i++) {
+        if (!fgets(line, sizeof line, stdin)) return 0;
+        line[strcspn(line, "\r\n")] = '\0';
+        memset(arena, CANARY, sizeof arena);
+        if (strncmp(line, "H2B", 3) == 0) {
+            int cap, used = 0;
+            if (sscanf(line + 3, "%d %n", &cap, &used) != 1) return 0;
+            const char *arg = line + 3 + used;
+            char text[4100];
+            const char *hex = NULL;
+            if (arg[0] == '"') {
+                const char *end = strrchr(arg, '"');
+                size_t len = (size_t)(end - arg - 1);
+                memcpy(text, arg + 1, len);
+                text[len] = '\0';
+                hex = text;
+            }
+            uint8_t *out = arena + GUARD;
+            memset(out, 0xEE, (size_t)cap);
+            int ret = hex_to_bytes(hex, out, (size_t)cap);
+            if (!guards_ok((size_t)cap)) {
+                printf("OUT OF BOUNDS WRITE\n");
+                return 0;
+            }
+            if (ret < 0) {
+                printf("ret=%d\n", ret);
+            } else if (ret > cap) {
+                printf("ret=%d (larger than out_size!)\n", ret);
+            } else {
+                printf("ret=%d [", ret);
+                for (int k = 0; k < ret; k++) printf(k ? " %02X" : "%02X", out[k]);
+                printf("]\n");
+            }
+        } else {
+            int n, used = 0;
+            uint8_t in[256];
+            const char *p = line + 3;
+            if (sscanf(p, "%d%n", &n, &used) != 1) return 0;
+            p += used;
+            for (int k = 0; k < n; k++) {
+                int v;
+                if (sscanf(p, "%d%n", &v, &used) != 1) return 0;
+                p += used;
+                in[k] = (uint8_t)v;
+            }
+            size_t cap = 2 * (size_t)n + 1;
+            char *out = (char *)arena + GUARD;
+            memset(out, '#', cap);
+            bytes_to_hex(in, (size_t)n, out);
+            if (!guards_ok(cap)) {
+                printf("OUT OF BOUNDS WRITE\n");
+                return 0;
+            }
+            if (!memchr(out, '\0', cap)) {
+                printf("MISSING TERMINATOR\n");
+                return 0;
+            }
+            printf("[%s]\n", out);
+        }
+    }
+    return 0;
+}
+@@@ sample_input
+3
+H2B 8 "22F190"
+H2B 8 "deadBEEF"
+B2H 4 0 1 254 255
+@@@ sample_output
+ret=3 [22 F1 90]
+ret=4 [DE AD BE EF]
+[0001FEFF]
+
+@@@ sample_input
+3
+H2B 8 ""
+H2B 8 "ABC"
+B2H 0
+@@@ sample_output
+ret=0 []
+ret=-1
+[]
+
+@@@ hidden_input
+4
+H2B 8 "0G"
+H2B 8 "12 34"
+H2B 8 "0x12"
+H2B 8 NULL
+@@@ hidden_output
+ret=-1
+ret=-1
+ret=-1
+ret=-1
+
+@@@ hidden_input
+4
+H2B 2 "112233"
+H2B 3 "112233"
+H2B 0 ""
+H2B 0 "00"
+@@@ hidden_output
+ret=-1
+ret=3 [11 22 33]
+ret=0 []
+ret=-1
+
+@@@ hidden_input
+5
+H2B 4 "9:"
+H2B 4 "@A"
+H2B 4 "`a"
+H2B 4 "fF"
+H2B 4 "Ff00aA"
+@@@ hidden_output
+ret=-1
+ret=-1
+ret=-1
+ret=1 [FF]
+ret=3 [FF 00 AA]
+
+@@@ hidden_input
+3
+B2H 1 10
+B2H 3 171 205 239
+B2H 16 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+@@@ hidden_output
+[0A]
+[ABCDEF]
+[000102030405060708090A0B0C0D0E0F]
+
+@@@ hidden_input
+2
+H2B 1 "7"
+H2B 1 "7F"
+@@@ hidden_output
+ret=-1
+ret=1 [7F]
+
+@@@ hidden_input
+2
+H2B 2000 "FF3E850A29484799e8f0f9E14bff75A9841cec9542f9a331CF3f6EBDe93aEDBB6244883976F32BdeF002C1b7FB0072BFc9ba9d30e56A948C599C1a6A7fE49d01a84134766e4f57e5D93060313439C58CAD5c12c5AF58a95500A23a279911002B494dC09908F683051C930E28EE412668a918852C985C9ae23C6804CD305ACD8fbe7F667A3d7D66973043037220B14cAB35062c3e970D1f8d8707B1333B57bb877eF05df2047FBAF18e5776E9c220F1AEC83F40d1A405f0ad56977931B3A0846A01b8ddD85592366dADe8a164CD28CBC8DAdbF9BFb8daC49b232f949F8fCCDE91C0EE1d03294f9262060EbbBB385f9451e4F28fDFca2455ad65E83b55c874825233AB574E784D852810e1FBC7FC5d02A15D9b3A09d27d593D95DAA42b542F2907D107C18E3825c91744789B5E10bcCE10beEF3216c97b8aA22a1C07FA2E9689071219959C646f148719EBd15a6d12B0F67e06AFDCA7B69e349dc89E994c415baa6fFA0951f1c320d10754d6920Af861AC15F8e93563c84F4b65f3a0e0a6c857485Fc25684D9b8a34c87c9E3DEDF059789fcdc18f8f547533fFBb845a735c2353a5b88B50d14E7565010632E16E5d20be5aaCA74FD56CC6369D62dC5c7F0C8ADD6DA655cC499e8f2351B39f01313f7751898dc341c7dee381F6e6b5716CF7277765471848160522D531f6561AC620c8d7b3E28922E624688bb3C8a356ECB574B7142C4651d62BEC00395fdb9b8C9a80a6412C7c40AFF6C0c95B7A195a6dc10E11f1C75376F97C4639cf41930114164A62D8ED0048749F87C0358C9b196F935F1d9599d324FF5FBCE75B4D2fe8fC1d7182D2A5d88803A81905e9619BF161a5d33F571538e9576FCB9e94e405b08429A18bc5d848acac9a000ffeaABF9FF38215eCDDDb08319125fDC4D397b7f56BB455D329f5D403eEFED843Dcb9595284A192cb814CC48B4c0BCEEfaee9AA2502470a1E86901e3B5a3ffD370B2efcc6948DD530e8fBF173c79aaA949E4B7fbce76B29a353388ab06DE6Fa7F015D3d69a2B048D27c5A0278b33c1C49194e7C4A8a8A40271730AD00997D5b7166f57eb93EB27905C2e88AF78E99bf72A754533b6B3de8FF4a49e8a96c7C8BA383694432c7fdd1503438fe9dc91cef96C00E782D18eF7fa163B5d118565e16aB0E2A1163EdfbfD5767Bcc0b8D23F384B0ace6e7D03288fb2Fb25F9dAF69B87dD5ec979CA00465860c4f584F6597a24E4Cf1599C8a96294B9881bb66eaCCe4ADffcb8e0d2aE567e11E364BEB3be772109a4859D7daB272a0a81f8ba41086FEB087F79ea1B47B5C9E02a9BD18e708FC83f128FEd1957FFAB3B704E48Ff88D9E3fC3e9de8f17BDdd75121fc50e41f4D85Da90A60C294f45a3c1da9e15e7bDB5B120d19671129a4821EA4117c0521a29D571b6596e2B00A29F33385984b6f68CFe2bcfe505EC427e25112f6f935600bE4299dB2B969c0B8008f4f11228CAE2B90652810b2ADbf3E96C6b44655D6D527458B8968E08f9cf777CAcbC4965B0F1d3654aac8A537f2e23634E07aA82058ec573536ff258c1CBE265bfe170Eee6a355a67989d4135360a5955F0090a4Bc155B3DFfcf09e981905a4FA40819f7f976B94564C079DDD61AF98E03a6c928fE857F14133B263eb69c58A5EE97a64446fB87cd81D80d2684DC88b8c181a5924a6ECA81334BE8ebdE6f66F41527B7376C813a9a7637df80fd14Eca13E18C7641d10c710d558B3545678fED59d2FBe54d7C75B47a76782608C538ec2Bee39032043aee4e6f09270BDC4889a60C173d20162d53509aeE8768c017e8A8E959916F8D3CA99585C4a595CD6DA0e0C775a51ca522bC30B6446FDd35E193bf23025C7005A592719F12c0659737ce3164C297BE02470f73AEF09D615b201981016553072AE5227e308af90ed7566AF379857687bB19C694Ca7aa178ad72C39A09f9f6784a9AE306Cf74B0e51B3910B25b45d2FD3D0a6b0faE4A0d96aA495B65A237e856F2164dc6E187999bb05f58E99F7b2e920598665FDff6433ECF131A6F7fb67A16CF06cC19fC2b049644389d14BB9CEae992435200B4E6D3e4a97faa22D7DD4D4B1eeBF77b84D69368446456cF3522a967809AA79dd2B3312BB6ce842B4033D3677F1559871121B7754E522f7491B3Db8f4E1de072Bed2Fc7764aF21d46e419DEf6d324ba82673F250AF81709056A802d4482C863ADECD874b50810CC9A78e0E6666a2775A4a64C57DF571D3BDE996a0ca2c660241c80A732ae7e3BE768180B63ff9053638C26ba270Bda2b248eff736E44849Fe42D0213199B856b05681A1270F91DA31AF53F02ABC559395DccF4146B63947d399bC99540B2f396bf51D86b238be70c3396499BFB47AD407E4fd0C51b38cfF0BB1D2ca4C02ca2B6addda99095EFc78845279DFE31C8AD381fD1ecfd95F90bF3036b85B9b14169c367c2e5f9de5C960Fe96091a263803118D7089F34F2DF227Ba93d2c4a2A2920B484BAe41d150A2B98B7f87f00AAa611D83FAE41e34A22EB83454A77d2441d9F829D7Bff7553305e1b47a9BE8f1D742571ef792a81B4FA3e006e4cc0c71753BF2449be8c77B0080791302aa7c8D52046DA7E22B287499fF4ECbdf95EA1ba045692213CE59e43c8ffF10b329022eaE44B0B8562316c2149E33FCA0BA9d947673eC5bdAB616025A91C346F7Bd31573f60CFD9cef00A85330e5EF2d38F9e6d3b64EB4b5c459356eE43851F5bbc61A898f61a85B8276B4F88Cd1f77d3aA64079285e58a03F239635af2a4035ABc3a844E7220359d3eb0828947f4D53c709604ff547A817d419FA9443cbFAc7032238BC3728062f9AB7"
+H2B 1999 "FF3E850A29484799e8f0f9E14bff75A9841cec9542f9a331CF3f6EBDe93aEDBB6244883976F32BdeF002C1b7FB0072BFc9ba9d30e56A948C599C1a6A7fE49d01a84134766e4f57e5D93060313439C58CAD5c12c5AF58a95500A23a279911002B494dC09908F683051C930E28EE412668a918852C985C9ae23C6804CD305ACD8fbe7F667A3d7D66973043037220B14cAB35062c3e970D1f8d8707B1333B57bb877eF05df2047FBAF18e5776E9c220F1AEC83F40d1A405f0ad56977931B3A0846A01b8ddD85592366dADe8a164CD28CBC8DAdbF9BFb8daC49b232f949F8fCCDE91C0EE1d03294f9262060EbbBB385f9451e4F28fDFca2455ad65E83b55c874825233AB574E784D852810e1FBC7FC5d02A15D9b3A09d27d593D95DAA42b542F2907D107C18E3825c91744789B5E10bcCE10beEF3216c97b8aA22a1C07FA2E9689071219959C646f148719EBd15a6d12B0F67e06AFDCA7B69e349dc89E994c415baa6fFA0951f1c320d10754d6920Af861AC15F8e93563c84F4b65f3a0e0a6c857485Fc25684D9b8a34c87c9E3DEDF059789fcdc18f8f547533fFBb845a735c2353a5b88B50d14E7565010632E16E5d20be5aaCA74FD56CC6369D62dC5c7F0C8ADD6DA655cC499e8f2351B39f01313f7751898dc341c7dee381F6e6b5716CF7277765471848160522D531f6561AC620c8d7b3E28922E624688bb3C8a356ECB574B7142C4651d62BEC00395fdb9b8C9a80a6412C7c40AFF6C0c95B7A195a6dc10E11f1C75376F97C4639cf41930114164A62D8ED0048749F87C0358C9b196F935F1d9599d324FF5FBCE75B4D2fe8fC1d7182D2A5d88803A81905e9619BF161a5d33F571538e9576FCB9e94e405b08429A18bc5d848acac9a000ffeaABF9FF38215eCDDDb08319125fDC4D397b7f56BB455D329f5D403eEFED843Dcb9595284A192cb814CC48B4c0BCEEfaee9AA2502470a1E86901e3B5a3ffD370B2efcc6948DD530e8fBF173c79aaA949E4B7fbce76B29a353388ab06DE6Fa7F015D3d69a2B048D27c5A0278b33c1C49194e7C4A8a8A40271730AD00997D5b7166f57eb93EB27905C2e88AF78E99bf72A754533b6B3de8FF4a49e8a96c7C8BA383694432c7fdd1503438fe9dc91cef96C00E782D18eF7fa163B5d118565e16aB0E2A1163EdfbfD5767Bcc0b8D23F384B0ace6e7D03288fb2Fb25F9dAF69B87dD5ec979CA00465860c4f584F6597a24E4Cf1599C8a96294B9881bb66eaCCe4ADffcb8e0d2aE567e11E364BEB3be772109a4859D7daB272a0a81f8ba41086FEB087F79ea1B47B5C9E02a9BD18e708FC83f128FEd1957FFAB3B704E48Ff88D9E3fC3e9de8f17BDdd75121fc50e41f4D85Da90A60C294f45a3c1da9e15e7bDB5B120d19671129a4821EA4117c0521a29D571b6596e2B00A29F33385984b6f68CFe2bcfe505EC427e25112f6f935600bE4299dB2B969c0B8008f4f11228CAE2B90652810b2ADbf3E96C6b44655D6D527458B8968E08f9cf777CAcbC4965B0F1d3654aac8A537f2e23634E07aA82058ec573536ff258c1CBE265bfe170Eee6a355a67989d4135360a5955F0090a4Bc155B3DFfcf09e981905a4FA40819f7f976B94564C079DDD61AF98E03a6c928fE857F14133B263eb69c58A5EE97a64446fB87cd81D80d2684DC88b8c181a5924a6ECA81334BE8ebdE6f66F41527B7376C813a9a7637df80fd14Eca13E18C7641d10c710d558B3545678fED59d2FBe54d7C75B47a76782608C538ec2Bee39032043aee4e6f09270BDC4889a60C173d20162d53509aeE8768c017e8A8E959916F8D3CA99585C4a595CD6DA0e0C775a51ca522bC30B6446FDd35E193bf23025C7005A592719F12c0659737ce3164C297BE02470f73AEF09D615b201981016553072AE5227e308af90ed7566AF379857687bB19C694Ca7aa178ad72C39A09f9f6784a9AE306Cf74B0e51B3910B25b45d2FD3D0a6b0faE4A0d96aA495B65A237e856F2164dc6E187999bb05f58E99F7b2e920598665FDff6433ECF131A6F7fb67A16CF06cC19fC2b049644389d14BB9CEae992435200B4E6D3e4a97faa22D7DD4D4B1eeBF77b84D69368446456cF3522a967809AA79dd2B3312BB6ce842B4033D3677F1559871121B7754E522f7491B3Db8f4E1de072Bed2Fc7764aF21d46e419DEf6d324ba82673F250AF81709056A802d4482C863ADECD874b50810CC9A78e0E6666a2775A4a64C57DF571D3BDE996a0ca2c660241c80A732ae7e3BE768180B63ff9053638C26ba270Bda2b248eff736E44849Fe42D0213199B856b05681A1270F91DA31AF53F02ABC559395DccF4146B63947d399bC99540B2f396bf51D86b238be70c3396499BFB47AD407E4fd0C51b38cfF0BB1D2ca4C02ca2B6addda99095EFc78845279DFE31C8AD381fD1ecfd95F90bF3036b85B9b14169c367c2e5f9de5C960Fe96091a263803118D7089F34F2DF227Ba93d2c4a2A2920B484BAe41d150A2B98B7f87f00AAa611D83FAE41e34A22EB83454A77d2441d9F829D7Bff7553305e1b47a9BE8f1D742571ef792a81B4FA3e006e4cc0c71753BF2449be8c77B0080791302aa7c8D52046DA7E22B287499fF4ECbdf95EA1ba045692213CE59e43c8ffF10b329022eaE44B0B8562316c2149E33FCA0BA9d947673eC5bdAB616025A91C346F7Bd31573f60CFD9cef00A85330e5EF2d38F9e6d3b64EB4b5c459356eE43851F5bbc61A898f61a85B8276B4F88Cd1f77d3aA64079285e58a03F239635af2a4035ABc3a844E7220359d3eb0828947f4D53c709604ff547A817d419FA9443cbFAc7032238BC3728062f9AB7"
+@@@ hidden_output
+ret=2000 [FF 3E 85 0A 29 48 47 99 E8 F0 F9 E1 4B FF 75 A9 84 1C EC 95 42 F9 A3 31 CF 3F 6E BD E9 3A ED BB 62 44 88 39 76 F3 2B DE F0 02 C1 B7 FB 00 72 BF C9 BA 9D 30 E5 6A 94 8C 59 9C 1A 6A 7F E4 9D 01 A8 41 34 76 6E 4F 57 E5 D9 30 60 31 34 39 C5 8C AD 5C 12 C5 AF 58 A9 55 00 A2 3A 27 99 11 00 2B 49 4D C0 99 08 F6 83 05 1C 93 0E 28 EE 41 26 68 A9 18 85 2C 98 5C 9A E2 3C 68 04 CD 30 5A CD 8F BE 7F 66 7A 3D 7D 66 97 30 43 03 72 20 B1 4C AB 35 06 2C 3E 97 0D 1F 8D 87 07 B1 33 3B 57 BB 87 7E F0 5D F2 04 7F BA F1 8E 57 76 E9 C2 20 F1 AE C8 3F 40 D1 A4 05 F0 AD 56 97 79 31 B3 A0 84 6A 01 B8 DD D8 55 92 36 6D AD E8 A1 64 CD 28 CB C8 DA DB F9 BF B8 DA C4 9B 23 2F 94 9F 8F CC DE 91 C0 EE 1D 03 29 4F 92 62 06 0E BB BB 38 5F 94 51 E4 F2 8F DF CA 24 55 AD 65 E8 3B 55 C8 74 82 52 33 AB 57 4E 78 4D 85 28 10 E1 FB C7 FC 5D 02 A1 5D 9B 3A 09 D2 7D 59 3D 95 DA A4 2B 54 2F 29 07 D1 07 C1 8E 38 25 C9 17 44 78 9B 5E 10 BC CE 10 BE EF 32 16 C9 7B 8A A2 2A 1C 07 FA 2E 96 89 07 12 19 95 9C 64 6F 14 87 19 EB D1 5A 6D 12 B0 F6 7E 06 AF DC A7 B6 9E 34 9D C8 9E 99 4C 41 5B AA 6F FA 09 51 F1 C3 20 D1 07 54 D6 92 0A F8 61 AC 15 F8 E9 35 63 C8 4F 4B 65 F3 A0 E0 A6 C8 57 48 5F C2 56 84 D9 B8 A3 4C 87 C9 E3 DE DF 05 97 89 FC DC 18 F8 F5 47 53 3F FB B8 45 A7 35 C2 35 3A 5B 88 B5 0D 14 E7 56 50 10 63 2E 16 E5 D2 0B E5 AA CA 74 FD 56 CC 63 69 D6 2D C5 C7 F0 C8 AD D6 DA 65 5C C4 99 E8 F2 35 1B 39 F0 13 13 F7 75 18 98 DC 34 1C 7D EE 38 1F 6E 6B 57 16 CF 72 77 76 54 71 84 81 60 52 2D 53 1F 65 61 AC 62 0C 8D 7B 3E 28 92 2E 62 46 88 BB 3C 8A 35 6E CB 57 4B 71 42 C4 65 1D 62 BE C0 03 95 FD B9 B8 C9 A8 0A 64 12 C7 C4 0A FF 6C 0C 95 B7 A1 95 A6 DC 10 E1 1F 1C 75 37 6F 97 C4 63 9C F4 19 30 11 41 64 A6 2D 8E D0 04 87 49 F8 7C 03 58 C9 B1 96 F9 35 F1 D9 59 9D 32 4F F5 FB CE 75 B4 D2 FE 8F C1 D7 18 2D 2A 5D 88 80 3A 81 90 5E 96 19 BF 16 1A 5D 33 F5 71 53 8E 95 76 FC B9 E9 4E 40 5B 08 42 9A 18 BC 5D 84 8A CA C9 A0 00 FF EA AB F9 FF 38 21 5E CD DD B0 83 19 12 5F DC 4D 39 7B 7F 56 BB 45 5D 32 9F 5D 40 3E EF ED 84 3D CB 95 95 28 4A 19 2C B8 14 CC 48 B4 C0 BC EE FA EE 9A A2 50 24 70 A1 E8 69 01 E3 B5 A3 FF D3 70 B2 EF CC 69 48 DD 53 0E 8F BF 17 3C 79 AA A9 49 E4 B7 FB CE 76 B2 9A 35 33 88 AB 06 DE 6F A7 F0 15 D3 D6 9A 2B 04 8D 27 C5 A0 27 8B 33 C1 C4 91 94 E7 C4 A8 A8 A4 02 71 73 0A D0 09 97 D5 B7 16 6F 57 EB 93 EB 27 90 5C 2E 88 AF 78 E9 9B F7 2A 75 45 33 B6 B3 DE 8F F4 A4 9E 8A 96 C7 C8 BA 38 36 94 43 2C 7F DD 15 03 43 8F E9 DC 91 CE F9 6C 00 E7 82 D1 8E F7 FA 16 3B 5D 11 85 65 E1 6A B0 E2 A1 16 3E DF BF D5 76 7B CC 0B 8D 23 F3 84 B0 AC E6 E7 D0 32 88 FB 2F B2 5F 9D AF 69 B8 7D D5 EC 97 9C A0 04 65 86 0C 4F 58 4F 65 97 A2 4E 4C F1 59 9C 8A 96 29 4B 98 81 BB 66 EA CC E4 AD FF CB 8E 0D 2A E5 67 E1 1E 36 4B EB 3B E7 72 10 9A 48 59 D7 DA B2 72 A0 A8 1F 8B A4 10 86 FE B0 87 F7 9E A1 B4 7B 5C 9E 02 A9 BD 18 E7 08 FC 83 F1 28 FE D1 95 7F FA B3 B7 04 E4 8F F8 8D 9E 3F C3 E9 DE 8F 17 BD DD 75 12 1F C5 0E 41 F4 D8 5D A9 0A 60 C2 94 F4 5A 3C 1D A9 E1 5E 7B DB 5B 12 0D 19 67 11 29 A4 82 1E A4 11 7C 05 21 A2 9D 57 1B 65 96 E2 B0 0A 29 F3 33 85 98 4B 6F 68 CF E2 BC FE 50 5E C4 27 E2 51 12 F6 F9 35 60 0B E4 29 9D B2 B9 69 C0 B8 00 8F 4F 11 22 8C AE 2B 90 65 28 10 B2 AD BF 3E 96 C6 B4 46 55 D6 D5 27 45 8B 89 68 E0 8F 9C F7 77 CA CB C4 96 5B 0F 1D 36 54 AA C8 A5 37 F2 E2 36 34 E0 7A A8 20 58 EC 57 35 36 FF 25 8C 1C BE 26 5B FE 17 0E EE 6A 35 5A 67 98 9D 41 35 36 0A 59 55 F0 09 0A 4B C1 55 B3 DF FC F0 9E 98 19 05 A4 FA 40 81 9F 7F 97 6B 94 56 4C 07 9D DD 61 AF 98 E0 3A 6C 92 8F E8 57 F1 41 33 B2 63 EB 69 C5 8A 5E E9 7A 64 44 6F B8 7C D8 1D 80 D2 68 4D C8 8B 8C 18 1A 59 24 A6 EC A8 13 34 BE 8E BD E6 F6 6F 41 52 7B 73 76 C8 13 A9 A7 63 7D F8 0F D1 4E CA 13 E1 8C 76 41 D1 0C 71 0D 55 8B 35 45 67 8F ED 59 D2 FB E5 4D 7C 75 B4 7A 76 78 26 08 C5 38 EC 2B EE 39 03 20 43 AE E4 E6 F0 92 70 BD C4 88 9A 60 C1 73 D2 01 62 D5 35 09 AE E8 76 8C 01 7E 8A 8E 95 99 16 F8 D3 CA 99 58 5C 4A 59 5C D6 DA 0E 0C 77 5A 51 CA 52 2B C3 0B 64 46 FD D3 5E 19 3B F2 30 25 C7 00 5A 59 27 19 F1 2C 06 59 73 7C E3 16 4C 29 7B E0 24 70 F7 3A EF 09 D6 15 B2 01 98 10 16 55 30 72 AE 52 27 E3 08 AF 90 ED 75 66 AF 37 98 57 68 7B B1 9C 69 4C A7 AA 17 8A D7 2C 39 A0 9F 9F 67 84 A9 AE 30 6C F7 4B 0E 51 B3 91 0B 25 B4 5D 2F D3 D0 A6 B0 FA E4 A0 D9 6A A4 95 B6 5A 23 7E 85 6F 21 64 DC 6E 18 79 99 BB 05 F5 8E 99 F7 B2 E9 20 59 86 65 FD FF 64 33 EC F1 31 A6 F7 FB 67 A1 6C F0 6C C1 9F C2 B0 49 64 43 89 D1 4B B9 CE AE 99 24 35 20 0B 4E 6D 3E 4A 97 FA A2 2D 7D D4 D4 B1 EE BF 77 B8 4D 69 36 84 46 45 6C F3 52 2A 96 78 09 AA 79 DD 2B 33 12 BB 6C E8 42 B4 03 3D 36 77 F1 55 98 71 12 1B 77 54 E5 22 F7 49 1B 3D B8 F4 E1 DE 07 2B ED 2F C7 76 4A F2 1D 46 E4 19 DE F6 D3 24 BA 82 67 3F 25 0A F8 17 09 05 6A 80 2D 44 82 C8 63 AD EC D8 74 B5 08 10 CC 9A 78 E0 E6 66 6A 27 75 A4 A6 4C 57 DF 57 1D 3B DE 99 6A 0C A2 C6 60 24 1C 80 A7 32 AE 7E 3B E7 68 18 0B 63 FF 90 53 63 8C 26 BA 27 0B DA 2B 24 8E FF 73 6E 44 84 9F E4 2D 02 13 19 9B 85 6B 05 68 1A 12 70 F9 1D A3 1A F5 3F 02 AB C5 59 39 5D CC F4 14 6B 63 94 7D 39 9B C9 95 40 B2 F3 96 BF 51 D8 6B 23 8B E7 0C 33 96 49 9B FB 47 AD 40 7E 4F D0 C5 1B 38 CF F0 BB 1D 2C A4 C0 2C A2 B6 AD DD A9 90 95 EF C7 88 45 27 9D FE 31 C8 AD 38 1F D1 EC FD 95 F9 0B F3 03 6B 85 B9 B1 41 69 C3 67 C2 E5 F9 DE 5C 96 0F E9 60 91 A2 63 80 31 18 D7 08 9F 34 F2 DF 22 7B A9 3D 2C 4A 2A 29 20 B4 84 BA E4 1D 15 0A 2B 98 B7 F8 7F 00 AA A6 11 D8 3F AE 41 E3 4A 22 EB 83 45 4A 77 D2 44 1D 9F 82 9D 7B FF 75 53 30 5E 1B 47 A9 BE 8F 1D 74 25 71 EF 79 2A 81 B4 FA 3E 00 6E 4C C0 C7 17 53 BF 24 49 BE 8C 77 B0 08 07 91 30 2A A7 C8 D5 20 46 DA 7E 22 B2 87 49 9F F4 EC BD F9 5E A1 BA 04 56 92 21 3C E5 9E 43 C8 FF F1 0B 32 90 22 EA E4 4B 0B 85 62 31 6C 21 49 E3 3F CA 0B A9 D9 47 67 3E C5 BD AB 61 60 25 A9 1C 34 6F 7B D3 15 73 F6 0C FD 9C EF 00 A8 53 30 E5 EF 2D 38 F9 E6 D3 B6 4E B4 B5 C4 59 35 6E E4 38 51 F5 BB C6 1A 89 8F 61 A8 5B 82 76 B4 F8 8C D1 F7 7D 3A A6 40 79 28 5E 58 A0 3F 23 96 35 AF 2A 40 35 AB C3 A8 44 E7 22 03 59 D3 EB 08 28 94 7F 4D 53 C7 09 60 4F F5 47 A8 17 D4 19 FA 94 43 CB FA C7 03 22 38 BC 37 28 06 2F 9A B7]
+ret=-1
+
+@@@ hidden_input
+1
+B2H 256 11 48 85 122 159 196 233 14 51 88 125 162 199 236 17 54 91 128 165 202 239 20 57 94 131 168 205 242 23 60 97 134 171 208 245 26 63 100 137 174 211 248 29 66 103 140 177 214 251 32 69 106 143 180 217 254 35 72 109 146 183 220 1 38 75 112 149 186 223 4 41 78 115 152 189 226 7 44 81 118 155 192 229 10 47 84 121 158 195 232 13 50 87 124 161 198 235 16 53 90 127 164 201 238 19 56 93 130 167 204 241 22 59 96 133 170 207 244 25 62 99 136 173 210 247 28 65 102 139 176 213 250 31 68 105 142 179 216 253 34 71 108 145 182 219 0 37 74 111 148 185 222 3 40 77 114 151 188 225 6 43 80 117 154 191 228 9 46 83 120 157 194 231 12 49 86 123 160 197 234 15 52 89 126 163 200 237 18 55 92 129 166 203 240 21 58 95 132 169 206 243 24 61 98 135 172 209 246 27 64 101 138 175 212 249 30 67 104 141 178 215 252 33 70 107 144 181 218 255 36 73 110 147 184 221 2 39 76 113 150 187 224 5 42 79 116 153 190 227 8 45 82 119 156 193 230
+@@@ hidden_output
+[0B30557A9FC4E90E33587DA2C7EC11365B80A5CAEF14395E83A8CDF2173C6186ABD0F51A3F6489AED3F81D42678CB1D6FB20456A8FB4D9FE23486D92B7DC01264B7095BADF04294E7398BDE2072C51769BC0E50A2F54799EC3E80D32577CA1C6EB10355A7FA4C9EE13385D82A7CCF1163B6085AACFF4193E6388ADD2F71C41668BB0D5FA1F44698EB3D8FD22476C91B6DB00254A6F94B9DE03284D7297BCE1062B50759ABFE4092E53789DC2E70C31567BA0C5EA0F34597EA3C8ED12375C81A6CBF0153A5F84A9CEF3183D6287ACD1F61B40658AAFD4F91E43688DB2D7FC21466B90B5DAFF24496E93B8DD02274C7196BBE0052A4F7499BEE3082D52779CC1E6]
+
+@@@ hint
+Write a helper `int nibble(char c)` that returns 0..15 for a valid hex digit and -1 otherwise. Check the three ranges `'0'..'9'`, `'a'..'f'` and `'A'..'F'` explicitly; the characters between them in ASCII (`':'`, `'@'`, `` '`' ``) are not hex.
+@@@ hint
+Compute `len` first and reject odd lengths or `len / 2 > out_size` **before** writing anything. Then combine two nibbles with `(hi << 4) | lo`. For the other direction, use a lookup string `"0123456789ABCDEF"` indexed by `b >> 4` and `b & 0x0F`.
+@@@ solution_code
+#include <stddef.h>
+#include <stdint.h>
+
+static int nibble(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+int hex_to_bytes(const char *hex, uint8_t *out, size_t out_size)
+{
+    size_t len = 0;
+
+    if (hex == NULL)
+        return -1;
+    while (hex[len] != '\0')
+        len++;
+    if (len % 2 != 0 || len / 2 > out_size)
+        return -1;                          /* validate size before any write */
+
+    for (size_t i = 0; i < len; i += 2) {
+        int hi = nibble(hex[i]);
+        int lo = nibble(hex[i + 1]);
+        if (hi < 0 || lo < 0)
+            return -1;
+        out[i / 2] = (uint8_t)((hi << 4) | lo);
+    }
+    return (int)(len / 2);
+}
+
+void bytes_to_hex(const uint8_t *in, size_t n, char *out)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    for (size_t i = 0; i < n; i++) {
+        out[2 * i]     = digits[in[i] >> 4];
+        out[2 * i + 1] = digits[in[i] & 0x0F];
+    }
+    out[2 * n] = '\0';
+}
+@@@ explanation_md
+**Approach.**
+- **Hex to bytes.** First measure the string and reject `NULL`, an odd length, or a result larger than `out_size`. Only then decode pairs: `out[i/2] = (nibble(hex[i]) << 4) | nibble(hex[i+1])`. Checking the size up front means an over-long input can never write past the buffer, even if it is invalid further on.
+- **Bytes to hex.** Two table lookups per byte: `"0123456789ABCDEF"[b >> 4]` and `[b & 0x0F]`. Then the terminator.
+
+`nibble()` checks three explicit ranges. In ASCII, `':'`..`'@'` lie between `'9'` and `'A'`, and `'['`..`` '`' `` lie between `'Z'` and `'a'`. A sloppy `c <= 'f'` range check accepts them.
+
+**Complexity.** Both directions are O(n) time and O(1) extra space.
+
+**Common mistakes**
+- Writing bytes while scanning and checking `out_size` only at the end. That is a buffer overflow for long input, and the harness's guard bytes catch it.
+- Using `sscanf(p, "%2hhx", &b)`. It accepts `"0x"`, leading spaces and single digits (`"7"` followed by `'\0'`), so it silently mis-parses invalid input. It is also slow on small MCUs.
+- `toupper(c) - 'A' + 10` without validating `c` first.
+- Storing bytes in plain `char`. `0xF1` becomes `-15`, and later `>> 4` or table indexing on it goes wrong. Use `uint8_t`.
+- Forgetting the terminator in `bytes_to_hex`, or emitting lowercase when the protocol log format requires uppercase.
+
+**Interview follow-ups**
+- Accept the human-friendly format `"22 F1 90"` (optional single spaces between bytes) without a second buffer.
+- Make `nibble()` branch-free, or use a 256-entry `int8_t` lookup table. What is the trade-off between flash and speed on a Cortex-M0?
+- Intel HEX and Motorola S-record firmware files are hex text with a checksum per line. How would you parse a `:10010000...` record and validate its checksum?
