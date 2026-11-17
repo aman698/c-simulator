@@ -151,9 +151,13 @@ export function analyzeStderr(stderr) {
       m[1] === 'SEGV'
         ? 'AddressSanitizer: SEGV (segmentation fault - invalid memory access)'
         : `AddressSanitizer: ${m[1]}`;
-    // heap checker + ASan (Windows clang): a 2nd free() reads the freed header first
-    if (m[1] === 'heap-use-after-free' && /#[01] 0x[0-9a-f]+ in csim_hc_(free|realloc)/.test(stderr))
-      out.title = 'AddressSanitizer: attempting double-free (free/realloc of memory that was already freed)';
+    // heap checker + ASan (Windows clang): a 2nd free() reads the freed header first. Only the
+    // *access* stack (before "freed by thread") decides; the free stack always contains csim_hc_free.
+    if (m[1] === 'heap-use-after-free') {
+      const accessStack = stderr.split(/freed by thread/)[0];
+      if (/#[0-2] 0x[0-9a-f]+ in (csim_hc_free|csim_hc_realloc|hc_validate)\b/.test(accessStack))
+        out.title = 'AddressSanitizer: attempting double-free (free/realloc of memory that was already freed)';
+    }
     const frame = /#\d+ 0x[0-9a-f]+ in \S+ (?:.*[\\/])?main\.c:(\d+)/.exec(stderr);
     if (frame) out.line = Number(frame[1]);
   } else if ((m = /^(?:.*[\\/])?([\w.]+):(\d+):(\d+): runtime error: (.*)$/m.exec(stderr))) {
@@ -227,7 +231,9 @@ export function classify(run, expected) {
   const crash = crashText(run);
   if (crash) return { ...res, verdict: VERDICT.RE, message: crash };
   if (run.code !== 0 && !(rep.leak && run.code === 23)) {
-    return { ...res, verdict: VERDICT.RE, message: `Non-zero exit code ${run.code} (main must return 0)` };
+    // Windows reports exit codes as unsigned 32-bit; show `return -35;` as -35, not 4294967261.
+    const shown = IS_WIN && run.code > 0x7fffffff ? run.code | 0 : run.code;
+    return { ...res, verdict: VERDICT.RE, message: `Non-zero exit code ${shown} (main must return 0)` };
   }
   if (expected != null && normalizeOutput(run.stdout) !== normalizeOutput(expected)) {
     return {
