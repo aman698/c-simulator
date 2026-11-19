@@ -8,7 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import express from 'express';
 import { DIST_DIR } from './paths.js';
-import { TOPICS, needsLeakCheck } from './topics.js';
+import { TOPICS, needsLeakCheck, runtimeOf } from './topics.js';
 import { allQuestions, getQuestion, publicView, summary } from './questions.js';
 import * as store from './store.js';
 import { getToolchain, describeSanitizers } from './judge/toolchain.js';
@@ -115,18 +115,19 @@ app.post(
     const opts = judgeOptions(req.body);
     const harness = q.harness_code || null;
     const leakCheck = needsLeakCheck(q);
+    const runtime = runtimeOf(q);
     let result;
     if (typeof req.body.customInput === 'string') {
       const input = req.body.customInput.slice(0, MAX_STDIN);
       // Expected output for custom input comes from the reference solution.
-      const ref = await judge({ ...opts, code: q.solution_code, harness, leakCheck, tests: [{ input, output: null }] });
+      const ref = await judge({ ...opts, code: q.solution_code, harness, leakCheck, runtime, tests: [{ input, output: null }] });
       const refTest = ref.tests[0];
       const expected = ref.compile.ok && refTest?.verdict === VERDICT.AC ? refTest.stdout : null;
-      result = await judge({ ...opts, harness, leakCheck, tests: [{ input, output: expected }] });
+      result = await judge({ ...opts, harness, leakCheck, runtime, tests: [{ input, output: expected }] });
       result.custom = true;
       if (expected == null) result.referenceNote = 'The reference solution rejected this input (outside the constraints?), so the output was not compared.';
     } else {
-      result = await judge({ ...opts, harness, leakCheck, tests: q.sample_tests });
+      result = await judge({ ...opts, harness, leakCheck, runtime, tests: q.sample_tests });
     }
     store.recordAttempt(q, { kind: 'run', verdict: result.verdict });
     res.json(result);
@@ -155,7 +156,7 @@ app.post(
     if (q.type === 'PREDICT_OUTPUT') throw httpError(400, 'Use /predict for PREDICT_OUTPUT questions');
     const opts = judgeOptions(req.body);
     const tests = [...q.sample_tests, ...q.hidden_tests];
-    const result = await judge({ ...opts, harness: q.harness_code || null, leakCheck: needsLeakCheck(q), tests });
+    const result = await judge({ ...opts, harness: q.harness_code || null, leakCheck: needsLeakCheck(q), runtime: runtimeOf(q), tests });
     const maxTime = result.tests.reduce((m, t) => Math.max(m, t.timeMs || 0), 0);
     store.recordAttempt(q, {
       kind: req.body.interviewId ? 'interview' : 'submit',
@@ -198,7 +199,12 @@ app.post(
   wrap(async (req, res) => {
     const opts = judgeOptions(req.body);
     const stdin = String(req.body.stdin ?? '').slice(0, MAX_STDIN);
-    const result = await judge({ ...opts, leakCheck: Boolean(req.body.leakCheck), tests: [{ input: stdin, output: null }] });
+    const result = await judge({
+      ...opts,
+      leakCheck: Boolean(req.body.leakCheck),
+      runtime: req.body.freertos ? 'freertos' : 'c',
+      tests: [{ input: stdin, output: null }],
+    });
     res.json(result);
   }),
 );

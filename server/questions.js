@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { QUESTIONS_DIR } from './paths.js';
-import { TOPICS } from './topics.js';
+import { TOPICS, topicByName } from './topics.js';
 
 const cache = new Map(); // slug -> { mtimeMs, questions }
 
@@ -44,6 +44,7 @@ export function summary(q) {
     type: q.type,
     title: q.title,
     tags: q.tags,
+    track: topicByName(q.topic)?.track || 'c',
   };
 }
 

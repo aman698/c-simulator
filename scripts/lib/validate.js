@@ -3,7 +3,7 @@
  * Used by scripts/validate_questions.js and scripts/qtool.js.
  */
 import { judge, VERDICT, USER_CODE_MARKER, normalizeOutput } from '../../server/judge/judge.js';
-import { TOPICS, DIFFICULTIES, TYPES, PREDICT_SPECIAL, topicByName, needsLeakCheck } from '../../server/topics.js';
+import { TOPICS, TRACKS, DIFFICULTIES, TYPES, PREDICT_SPECIAL, topicByName, needsLeakCheck, runtimeOf } from '../../server/topics.js';
 import { AUTO } from './qformat.js';
 
 const DIFF_LETTER = { Easy: 'E', Medium: 'M', Hard: 'H' };
@@ -20,6 +20,8 @@ export function schemaErrors(q) {
   if (!topic) e.push(`unknown topic "${q.topic}" (expected one of ${TOPICS.map((t) => t.name).join(', ')})`);
   if (!DIFFICULTIES.includes(q.difficulty)) e.push(`bad difficulty "${q.difficulty}"`);
   if (!TYPES.includes(q.type)) e.push(`bad type "${q.type}"`);
+  else if (topic && !TRACKS[topic.track].types.includes(q.type))
+    e.push(`type ${q.type} is not used in the ${TRACKS[topic.track].name} track (allowed: ${TRACKS[topic.track].types.join(', ')})`);
   const idRe = /^([A-Z]{3})-([EMH])-(\d{2})$/;
   const m = idRe.exec(q.id || '');
   if (!m) e.push(`id "${q.id}" must look like ARR-E-01`);
@@ -175,7 +177,8 @@ export async function validateQuestion(q, opts = {}) {
   if (errors.length) return { id: q.id, ok: false, errors, notes, ms: Date.now() - t0 };
 
   const leakCheck = needsLeakCheck(q);
-  const common = { std: opts.std || 'c11', sanitizers: true, leakCheck, toolchain: opts.toolchain };
+  const runtime = runtimeOf(q);
+  const common = { std: opts.std || 'c11', sanitizers: true, leakCheck, toolchain: opts.toolchain, runtime };
   const harness = q.harness_code || null;
 
   if (q.type === 'PREDICT_OUTPUT') {
@@ -214,6 +217,18 @@ export async function validateQuestion(q, opts = {}) {
       else if (t.stderr && t.stderr.trim()) errors.push(`solution writes to stderr on test #${t.index + 1}: ${t.stderr.trim().slice(0, 200)}`);
       if (t.timeMs > 1000) notes.push(`solution is slow on test #${t.index + 1} (${t.timeMs} ms)`);
     }
+    // Multi-threaded FreeRTOS simulation: prove the output is identical on repeated runs.
+    if (runtime === 'freertos' && errors.length === 0) {
+      for (let rep = 2; rep <= 3; rep++) {
+        const again = await judge({ ...common, code: q.solution_code, harness, tests: testsOf(q) });
+        again.tests.forEach((t, i) => {
+          if (t.verdict !== VERDICT.AC || t.stdout !== sol.tests[i].stdout)
+            errors.push(`non-deterministic: test #${i + 1} gave a different result on run ${rep} (${t.verdict})`);
+        });
+        if (errors.length) break;
+      }
+      if (!errors.length) notes.push('FreeRTOS output identical across 3 runs');
+    }
   }
 
   if (q.type === 'FIND_THE_BUG') {
@@ -243,18 +258,22 @@ export function bankErrors(questions, { topics = TOPICS } = {}) {
   for (const topic of topics) {
     const qs = questions.filter((q) => q.topic === topic.name);
     const by = (k, v) => qs.filter((q) => q[k] === v).length;
+    const rules = TRACKS[topic.track];
     const counts = DIFFICULTIES.map((d) => by('difficulty', d));
-    if (qs.length !== 30 || counts.some((c) => c !== 10))
-      errs.push(`${topic.name}: expected 30 questions (10/10/10), found ${qs.length} (${counts.join('/')})`);
+    const want = DIFFICULTIES.map((d) => rules.difficulty[d]);
+    if (qs.length !== rules.perTopic || counts.some((c, i) => c !== want[i]))
+      errs.push(`${topic.name}: expected ${rules.perTopic} questions (${want.join('/')}), found ${qs.length} (${counts.join('/')})`);
     const code = by('type', 'CODE') + by('type', 'FUNCTION');
     const pred = by('type', 'PREDICT_OUTPUT');
     const bug = by('type', 'FIND_THE_BUG');
-    if (qs.length === 30) {
+    if (qs.length === rules.perTopic && rules.checkTypeMix) {
       if (pred < 5 || pred > 7) errs.push(`${topic.name}: PREDICT_OUTPUT count ${pred} (expected ~6, 5..7)`);
       if (bug < 5 || bug > 7) errs.push(`${topic.name}: FIND_THE_BUG count ${bug} (expected ~6, 5..7)`);
       if (code < 16) errs.push(`${topic.name}: CODE+FUNCTION count ${code} (expected ~18)`);
+    }
+    if (qs.length === rules.perTopic && rules.embeddedMin) {
       const emb = qs.filter((q) => q.tags.includes('embedded')).length;
-      if (emb < 9) errs.push(`${topic.name}: only ${emb} questions tagged "embedded" (need >= 30% = 9)`);
+      if (emb < rules.embeddedMin) errs.push(`${topic.name}: only ${emb} questions tagged "embedded" (need >= ${rules.embeddedMin})`);
     }
     const titles = new Map();
     for (const q of qs) {

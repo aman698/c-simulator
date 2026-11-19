@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { QUESTIONS_SRC_DIR } from '../server/paths.js';
-import { TOPICS, TYPES, topicBySlug, needsLeakCheck } from '../server/topics.js';
+import { TOPICS, TYPES, topicBySlug, needsLeakCheck, runtimeOf } from '../server/topics.js';
 import { judge, normalizeOutput } from '../server/judge/judge.js';
 import { getToolchain } from '../server/judge/toolchain.js';
 import { readQuestionFile, fillAutoOutputs, AUTO } from './lib/qformat.js';
@@ -145,6 +145,7 @@ async function cmdFill(args) {
         harness: q.harness_code || null,
         tests: tests.map((t) => ({ input: t.input, output: null })),
         leakCheck: needsLeakCheck(q),
+        runtime: runtimeOf(q),
       });
       if (!r.compile.ok) {
         console.error(`${path.basename(f)}: solution does not compile:\n${r.compile.output}`);
@@ -180,6 +181,7 @@ async function cmdRun(args) {
     harness: q.harness_code || null,
     tests: [{ input, output: null }],
     leakCheck: needsLeakCheck(q),
+    runtime: runtimeOf(q),
   });
   if (!r.compile.ok || r.compile.warnings) console.log(r.compile.output);
   if (r.compile.ok) {

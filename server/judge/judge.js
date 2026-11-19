@@ -5,6 +5,7 @@
  * validator exercises exactly the same compile flags and verdict logic as the app.
  */
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -63,7 +64,80 @@ function quoteArg(a) {
 }
 
 /** Map the UI options onto concrete compiler flags for the active toolchain. */
-export function buildCompilePlan(tc, { std = 'c11', sanitizers = true, leakCheck = false } = {}) {
+// ---------------------------------------------------------------- FreeRTOS runtime
+
+const RTOS_DIR = path.join(RUNTIME_DIR, 'freertos');
+const RTOS_KERNEL = path.join(RTOS_DIR, 'kernel');
+const RTOS_SIM = path.join(RTOS_DIR, 'sim');
+const RTOS_SOURCES = [
+  'kernel/tasks.c',
+  'kernel/queue.c',
+  'kernel/list.c',
+  'kernel/timers.c',
+  'kernel/event_groups.c',
+  'kernel/stream_buffer.c',
+  'kernel/portable/MemMang/heap_4.c',
+  'sim/port.c',
+  'sim/sim.c',
+];
+const rtosObjName = (src) => path.basename(src).replace(/\.c$/, '.o');
+const rtosBuilds = new Map(); // toolchain key -> Promise<string[]>
+
+/**
+ * Compile the FreeRTOS kernel + simulator port once per toolchain and cache the
+ * objects in <tmp>/csim-freertos/<hash>/ (shared by the server and the validator).
+ */
+export function ensureRtosObjects(tc) {
+  const memoKey = `${tc.cc}|${tc.version}`;
+  if (!rtosBuilds.has(memoKey)) {
+    const p = buildRtosObjects(tc).catch((err) => {
+      rtosBuilds.delete(memoKey);
+      throw err;
+    });
+    rtosBuilds.set(memoKey, p);
+  }
+  return rtosBuilds.get(memoKey);
+}
+
+async function buildRtosObjects(tc) {
+  const hash = crypto.createHash('sha1').update(`${tc.cc}|${tc.version}|${tc.machine}`);
+  const simFiles = fs.readdirSync(RTOS_SIM).sort();
+  for (const f of simFiles) hash.update(f).update(fs.readFileSync(path.join(RTOS_SIM, f)));
+  hash.update(fs.readFileSync(path.join(RTOS_KERNEL, 'VERSION')));
+  const base = path.join(os.tmpdir(), 'csim-freertos');
+  const dir = path.join(base, hash.digest('hex').slice(0, 16));
+  const objects = RTOS_SOURCES.map((s) => path.join(dir, rtosObjName(s)));
+  if (objects.every((o) => fs.existsSync(o))) return objects;
+
+  fs.mkdirSync(base, { recursive: true });
+  const tmp = fs.mkdtempSync(path.join(base, 'build-'));
+  const results = await Promise.all(
+    RTOS_SOURCES.map((src) =>
+      runCapture(
+        tc.cc,
+        [
+          '-std=gnu11', '-O0', '-g', '-w', ...(tc.isMinGW ? ['-mno-ms-bitfields'] : []),
+          '-I', path.join(RTOS_KERNEL, 'include'), '-I', RTOS_SIM,
+          '-c', path.join(RTOS_DIR, src), '-o', path.join(tmp, rtosObjName(src)),
+        ],
+        { env: toolEnv(tc.cc), timeoutMs: 180000 },
+      ),
+    ),
+  );
+  const failed = results.find((r) => r.code !== 0);
+  if (failed) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    throw new Error(`Building the FreeRTOS kernel failed:\n${failed.stdout}${failed.stderr}`);
+  }
+  try {
+    fs.renameSync(tmp, dir);
+  } catch {
+    fs.rmSync(tmp, { recursive: true, force: true }); // another process won the race
+  }
+  return objects;
+}
+
+export function buildCompilePlan(tc, { std = 'c11', sanitizers = true, leakCheck = false, rtos = null } = {}) {
   const s = tc.support || {};
   const stdFlag = std === 'c99' ? 'c99' : 'c11';
   const flags = [`-std=${stdFlag}`, '-Wall', '-Wextra', '-Werror=implicit-function-declaration', '-g'];
@@ -105,14 +179,37 @@ export function buildCompilePlan(tc, { std = 'c11', sanitizers = true, leakCheck
     sources.push('heapcheck.c');
     runtimeFiles.push('heapcheck.h', 'heapcheck.c');
   }
-  const args = [...flags, '-fdiagnostics-color=never', '-o', tc.exeName, ...sources, '-lm'];
-  const display = [tc.ccName === 'clang' ? 'clang' : 'gcc', ...flags, '-o', 'prog', ...sources].map(quoteArg).join(' ');
+  // FreeRTOS: kernel headers as system headers (their warnings are not the user's), kernel
+  // objects linked in, host threads for the simulator port.
+  const rtosInc = rtos ? rtos.include.flatMap((d) => ['-isystem', d]) : [];
+  const args = [...flags, ...rtosInc, '-fdiagnostics-color=never', '-o', tc.exeName, ...sources, ...(rtos ? rtos.objects : []), '-lm', ...(rtos ? ['-pthread'] : [])];
+  const display = [
+    tc.ccName === 'clang' ? 'clang' : 'gcc',
+    ...flags,
+    ...(rtos ? ['-I<FreeRTOS-Kernel>/include', '-I<sim-port>'] : []),
+    '-o', 'prog', ...sources,
+    ...(rtos ? ['<freertos-kernel.o>', '-pthread'] : []),
+  ]
+    .map(quoteArg)
+    .join(' ');
   const runEnv = {
     ASAN_OPTIONS: `detect_leaks=${s.lsan ? 1 : 0}:abort_on_error=0:halt_on_error=1:allocator_may_return_null=1:hard_rss_limit_mb=384:quarantine_size_mb=32:print_summary=1:symbolize=1`,
     UBSAN_OPTIONS: 'halt_on_error=1:print_stacktrace=1:print_summary=1',
     LSAN_OPTIONS: 'exitcode=23',
   };
-  return { args, display, runEnv, heapcheck, sanitizerRuntime, runtimeFiles, leakDetection: lsanActive || heapcheck || flags.includes('-fsanitize=leak') };
+  return {
+    args,
+    display,
+    runEnv,
+    heapcheck,
+    sanitizerRuntime,
+    runtimeFiles,
+    rtos,
+    // glibc reserves 64 MB of address space per thread arena, so `ulimit -v` would break the
+    // multi-threaded FreeRTOS simulator; it is only applied to plain single-threaded programs.
+    virtualLimit: !sanitizerRuntime && !rtos,
+    leakDetection: lsanActive || heapcheck || flags.includes('-fsanitize=leak'),
+  };
 }
 
 const DIAG_RE = /^(?:.*[\\/])?(main\.c|harness\.c|heapcheck\.[ch]):(\d+):(?:(\d+):)? (fatal error|error|warning|note): (.*)$/;
@@ -169,6 +266,9 @@ export function analyzeStderr(stderr) {
     out.title = `Heap checker: ${m[1]}`;
     const at = /at main\.c:(\d+)/.exec(m[1]);
     if (at) out.line = Number(at[1]);
+  } else if ((m = /==FREERTOS== (.*)/.exec(stderr))) {
+    out.kind = 'freertos';
+    out.title = `FreeRTOS: ${m[1]}`;
   } else if (/\*\*\* stack smashing detected \*\*\*/.test(stderr)) {
     out.kind = 'ssp';
     out.title = 'Stack buffer overflow (stack smashing detected)';
@@ -222,10 +322,16 @@ function crashText(run) {
 }
 
 /** Decide the verdict of one test run. */
-export function classify(run, expected) {
+export function classify(run, expected, { runtime = 'c' } = {}) {
   const rep = analyzeStderr(run.stderr || '');
   const res = { verdict: VERDICT.AC, message: '', line: rep.line, leak: rep.leak, sanitizer: rep.kind };
-  if (run.timedOut) return { ...res, verdict: VERDICT.TLE, message: `Time limit exceeded (${run.timeLimitMs} ms)` };
+  if (run.timedOut) {
+    const hint =
+      runtime === 'freertos'
+        ? '. Simulated time only advances when every task is blocked: a task that never blocks (busy loop, no vTaskDelay / queue / semaphore wait) starves the idle task.'
+        : '';
+    return { ...res, verdict: VERDICT.TLE, message: `Time limit exceeded (${run.timeLimitMs} ms)${hint}` };
+  }
   if (run.outputLimit) return { ...res, verdict: VERDICT.RE, message: 'Output limit exceeded (more than 1 MiB on stdout)' };
   if (rep.kind) return { ...res, verdict: VERDICT.RE, message: rep.title };
   const crash = crashText(run);
@@ -256,7 +362,7 @@ function runProgramNative(tc, dir, input, plan, timeLimitMs) {
     let args = [];
     let detached = false;
     if (!IS_WIN) {
-      const vlimit = plan.sanitizerRuntime ? '' : 'ulimit -v 262144 2>/dev/null; ';
+      const vlimit = plan.virtualLimit ? 'ulimit -v 262144 2>/dev/null; ' : '';
       cmd = '/bin/sh';
       args = ['-c', `${vlimit}ulimit -f 2048 2>/dev/null; exec ./${tc.exeName}`];
       detached = true; // own process group so a timeout kills everything
@@ -330,9 +436,16 @@ async function judgeInDocker(tc, dir, plan, inputs, timeLimitMs, compileOnly) {
   const envExports = Object.entries(plan.runEnv)
     .map(([k, v]) => `export ${k}=${shQuote(v)}`)
     .join('\n');
+  // FreeRTOS: compile the kernel + simulator port inside the container (mounted read-only at /freertos)
+  const rtosBuild = plan.rtos
+    ? `mkdir -p rtos\n${RTOS_SOURCES.map(
+        (src) => `gcc -std=gnu11 -O0 -g -w -I/freertos/kernel/include -I/freertos/sim -c /freertos/${src} -o rtos/${rtosObjName(src)} >> compile.txt 2>&1 || { echo 1 > compile.rc; exit 0; }`,
+      ).join('\n')}\n`
+    : '';
   const script = `#!/bin/sh
 cd /work
-gcc ${plan.args.map(shQuote).join(' ')} > compile.txt 2>&1
+: > compile.txt
+${rtosBuild}gcc ${plan.args.map(shQuote).join(' ')} >> compile.txt 2>&1
 echo $? > compile.rc
 [ "$(cat compile.rc)" = "0" ] || exit 0
 ${compileOnly ? 'exit 0' : ''}
@@ -351,8 +464,9 @@ done
   const r = await runCapture(
     'docker',
     [
-      'run', '--rm', '--network', 'none', '--memory', '128m', '--memory-swap', '128m', '--pids-limit', '64',
-      '--cpus', '1', '--cap-add', 'SYS_PTRACE', ...dockerUserArgs(), '-v', `${dir}:/work`, '-w', '/work', DOCKER_IMAGE, 'sh', 'run.sh',
+      'run', '--rm', '--network', 'none', '--memory', '128m', '--memory-swap', '128m', '--pids-limit', '128',
+      '--cpus', '1', '--cap-add', 'SYS_PTRACE', ...dockerUserArgs(), '-v', `${dir}:/work`,
+      ...(plan.rtos ? ['-v', `${RTOS_DIR}:/freertos:ro`] : []), '-w', '/work', DOCKER_IMAGE, 'sh', 'run.sh',
     ],
     { timeoutMs: 60000 + inputs.length * (timeLimitMs + 1500) },
   );
@@ -444,6 +558,7 @@ export async function judge({
   stopOnFirstFailure = false,
   compileOnly = false,
   toolchain = null,
+  runtime = 'c',
 }) {
   const tc = toolchain || (await getToolchain());
   if (!tc || tc.mode === 'none') {
@@ -451,7 +566,14 @@ export async function judge({
     err.status = 503;
     throw err;
   }
-  const plan = buildCompilePlan(tc, { std, sanitizers, leakCheck });
+  let rtos = null;
+  if (runtime === 'freertos') {
+    rtos =
+      tc.mode === 'docker'
+        ? { include: ['/freertos/kernel/include', '/freertos/sim'], objects: RTOS_SOURCES.map((s) => `rtos/${rtosObjName(s)}`) }
+        : { include: [path.join(RTOS_KERNEL, 'include'), RTOS_SIM], objects: await ensureRtosObjects(tc) };
+  }
+  const plan = buildCompilePlan(tc, { std, sanitizers, leakCheck, rtos });
   const source = assembleSource(code, harness);
   return withSlot(async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'csim-'));
@@ -493,7 +615,7 @@ export async function judge({
       for (let i = 0; i < tests.length; i++) {
         const t = tests[i];
         const run = tc.mode === 'docker' ? runs[i] : await runProgramNative(tc, dir, t.input, plan, timeLimitMs);
-        const cls = classify(run, t.output);
+        const cls = classify(run, t.output, { runtime });
         const stderr = scrub(run.stderr, dir);
         result.tests.push({
           index: i,
