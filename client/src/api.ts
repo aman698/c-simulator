@@ -56,7 +56,7 @@ export const api = {
     post<JudgeResult>(`/api/questions/${encodeURIComponent(id)}/submit`, opts),
   predict: (id: string, answer: string, interviewId?: string) =>
     post<PredictResult>(`/api/questions/${encodeURIComponent(id)}/predict`, { answer, interviewId }),
-  playground: (opts: JudgeOptions & { stdin: string; leakCheck: boolean }) => post<JudgeResult>('/api/playground', opts),
+  playground: (opts: JudgeOptions & { stdin: string; leakCheck: boolean; freertos: boolean }) => post<JudgeResult>('/api/playground', opts),
   progress: () => request<Progress>('/api/progress'),
   saveCode: (id: string, code: string, updatedAt: number) =>
     request<SavedCode>(`/api/code/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ code, updatedAt }) }),

@@ -9,10 +9,15 @@ export type Verdict =
   | 'Memory Leak';
 export type Status = 'unsolved' | 'attempted' | 'solved';
 
+export type Track = 'c' | 'freertos';
+export const TRACK_NAMES: Record<Track, string> = { c: 'C', freertos: 'FreeRTOS' };
+
 export interface Topic {
   slug: string;
   name: string;
   prefix: string;
+  track: Track;
+  runtime: 'c' | 'freertos';
   leakCheck: boolean;
   count: number;
 }
@@ -24,6 +29,7 @@ export interface QuestionSummary {
   type: QType;
   title: string;
   tags: string[];
+  track: Track;
 }
 
 export interface TestCase {

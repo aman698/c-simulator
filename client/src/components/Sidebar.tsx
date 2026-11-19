@@ -20,6 +20,8 @@ const DIFFS: Difficulty[] = ['Easy', 'Medium', 'Hard'];
 export function Sidebar({ activeId }: { activeId?: string }) {
   const { questions, topics, statusOf } = useApp();
   const [f, setF] = useLocalStorage<Filters>('csim:filters', DEFAULT_FILTERS);
+  // the remembered topic may belong to the other track
+  const topicSel = topics.some((t) => t.name === f.topic) ? f.topic : 'all';
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setF((prev) => ({ ...prev, [k]: v }));
 
   const solvedByTopic = useMemo(() => {
@@ -32,14 +34,14 @@ export function Sidebar({ activeId }: { activeId?: string }) {
     const s = f.search.trim().toLowerCase();
     return questions.filter(
       (q) =>
-        (f.topic === 'all' || q.topic === f.topic) &&
+        (topicSel === 'all' || q.topic === topicSel) &&
         (f.difficulty === 'all' || q.difficulty === f.difficulty) &&
         (f.type === 'all' || q.type === f.type) &&
         (f.status === 'all' || statusOf(q.id) === f.status) &&
         (!f.embedded || q.tags.includes('embedded')) &&
         (!s || q.title.toLowerCase().includes(s) || q.id.toLowerCase().includes(s) || q.tags.some((t) => t.includes(s))),
     );
-  }, [questions, f, statusOf]);
+  }, [questions, f, topicSel, statusOf]);
 
   const totalSolved = Object.values(solvedByTopic).reduce((a, b) => a + b, 0);
   const filtered = JSON.stringify({ ...f, topic: 'all' }) !== JSON.stringify({ ...DEFAULT_FILTERS });
@@ -47,11 +49,11 @@ export function Sidebar({ activeId }: { activeId?: string }) {
   return (
     <aside className="flex h-full flex-col border-r border-slate-800 bg-[#0c111c]">
       <nav className="border-b border-slate-800 p-2" aria-label="Topics">
-        <TopicButton active={f.topic === 'all'} onClick={() => set('topic', 'all')} label="All topics" solved={totalSolved} total={questions.length} />
+        <TopicButton active={topicSel === 'all'} onClick={() => set('topic', 'all')} label="All topics" solved={totalSolved} total={questions.length} />
         {topics.map((t) => (
           <TopicButton
             key={t.slug}
-            active={f.topic === t.name}
+            active={topicSel === t.name}
             onClick={() => set('topic', t.name)}
             label={t.name}
             solved={solvedByTopic[t.name] || 0}

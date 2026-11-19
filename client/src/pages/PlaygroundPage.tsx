@@ -23,11 +23,69 @@ int main(void)
 }
 `;
 
+const FREERTOS_EXAMPLE = `#include <stdio.h>
+#include "FreeRTOS.h"
+#include "task.h"
+#include "queue.h"
+#include "sim.h"   /* simulator control: tick limit, simulated interrupts, busy work */
+
+static QueueHandle_t rx;
+
+/* Simulated UART RX interrupt (scheduled below at tick 5). */
+static void uart_isr(void *arg)
+{
+    BaseType_t woken = pdFALSE;
+    char c = (char)(intptr_t)arg;
+    xQueueSendFromISR(rx, &c, &woken);
+    portYIELD_FROM_ISR(woken);
+}
+
+static void consumer(void *p)
+{
+    (void)p;
+    char c;
+    for (;;) {
+        if (xQueueReceive(rx, &c, portMAX_DELAY) == pdPASS)
+            printf("[t=%u] consumer got '%c'\\n", (unsigned)xTaskGetTickCount(), c);
+    }
+}
+
+static void producer(void *p)
+{
+    (void)p;
+    TickType_t last = xTaskGetTickCount();
+    for (char c = 'a'; c <= 'c'; c++) {
+        xTaskDelayUntil(&last, pdMS_TO_TICKS(10));
+        printf("[t=%u] producer sends '%c'\\n", (unsigned)xTaskGetTickCount(), c);
+        xQueueSend(rx, &c, 0);
+    }
+    vTaskDelete(NULL);
+}
+
+int main(void)
+{
+    rx = xQueueCreate(8, sizeof(char));
+    xTaskCreate(consumer, "cons", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
+    xTaskCreate(producer, "prod", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+    xSimScheduleInterrupt(5, uart_isr, (void *)(intptr_t)'!');
+    vSimSetTickLimit(40);          /* vTaskStartScheduler() returns at tick 40 */
+    vTaskStartScheduler();
+    printf("simulation ended at t=%u\\n", (unsigned)xTaskGetTickCount());
+    return 0;
+}
+`;
+
 export function PlaygroundPage() {
   const { std, setStd, sanitizers, setSanitizers } = useApp();
   const [code, setCode] = useLocalStorage('csim:playground:code', DEFAULT_CODE);
   const [stdin, setStdin] = useLocalStorage('csim:playground:stdin', '3 7 31\n');
   const [leakCheck, setLeakCheck] = useLocalStorage('csim:playground:leak', true);
+  const [freertos, setFreertos] = useLocalStorage('csim:playground:freertos', false);
+  const toggleFreertos = (on: boolean) => {
+    setFreertos(on);
+    if (on && code === DEFAULT_CODE) setCode(FREERTOS_EXAMPLE);
+    if (!on && code === FREERTOS_EXAMPLE) setCode(DEFAULT_CODE);
+  };
   const [result, setResult] = useState<JudgeResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,13 +96,13 @@ export function PlaygroundPage() {
     setRunning(true);
     setError(null);
     try {
-      setResult(await api.playground({ code, std, sanitizers, stdin, leakCheck }));
+      setResult(await api.playground({ code, std, sanitizers, stdin, leakCheck, freertos }));
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setRunning(false);
     }
-  }, [running, code, std, sanitizers, stdin, leakCheck]);
+  }, [running, code, std, sanitizers, stdin, leakCheck, freertos]);
 
   const t = result?.tests[0];
 
@@ -65,8 +123,18 @@ export function PlaygroundPage() {
             <input type="checkbox" checked={leakCheck} onChange={(e) => setLeakCheck(e.target.checked)} className="accent-sky-500" />
             Leak check
           </label>
+          <label
+            className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-300"
+            title="Compile against the FreeRTOS kernel with the deterministic virtual-time simulator (include sim.h for the control API)"
+          >
+            <input type="checkbox" checked={freertos} onChange={(e) => toggleFreertos(e.target.checked)} className="accent-sky-500" />
+            FreeRTOS kernel
+          </label>
           <div className="ml-auto flex gap-2">
-            <button onClick={() => window.confirm('Reset the playground code?') && setCode(DEFAULT_CODE)} className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-800">
+            <button
+              onClick={() => window.confirm('Reset the playground code?') && setCode(freertos ? FREERTOS_EXAMPLE : DEFAULT_CODE)}
+              className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-800"
+            >
               ↺ Reset
             </button>
             <button

@@ -1,11 +1,17 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { useLocalStorage } from './hooks';
-import type { CStd, Health, Progress, QuestionSummary, Status, Topic } from './types';
+import type { CStd, Health, Progress, QuestionSummary, Status, Topic, Track } from './types';
 
 interface AppState {
+  /** every question / topic of every track */
+  allQuestions: QuestionSummary[];
+  allTopics: Topic[];
+  /** questions / topics of the selected track */
   questions: QuestionSummary[];
   topics: Topic[];
+  track: Track;
+  setTrack: (t: Track) => void;
   progress: Progress | null;
   health: Health | null;
   loading: boolean;
@@ -22,12 +28,13 @@ interface AppState {
 const Ctx = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [questions, setQuestions] = useState<QuestionSummary[]>([]);
-  const [topics, setTopics] = useState<Topic[]>([]);
+  const [allQuestions, setAllQuestions] = useState<QuestionSummary[]>([]);
+  const [allTopics, setAllTopics] = useState<Topic[]>([]);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [track, setTrack] = useLocalStorage<Track>('csim:track', 'c');
   const [std, setStd] = useLocalStorage<CStd>('csim:std', 'c11');
   const [sanitizers, setSanitizers] = useLocalStorage<boolean>('csim:sanitizers', true);
 
@@ -43,8 +50,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       const [qs, ts, pr] = await Promise.all([api.questions(), api.topics(), api.progress()]);
-      setQuestions(qs);
-      setTopics(ts);
+      setAllQuestions(qs);
+      setAllTopics(ts);
       setProgress(pr);
       setError(null);
     } catch (e) {
@@ -67,10 +74,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [progress],
   );
 
+  const questions = useMemo(() => allQuestions.filter((q) => (q.track || 'c') === track), [allQuestions, track]);
+  const topics = useMemo(() => allTopics.filter((t) => (t.track || 'c') === track), [allTopics, track]);
+
   const value = useMemo<AppState>(
     () => ({
+      allQuestions,
+      allTopics,
       questions,
       topics,
+      track,
+      setTrack,
       progress,
       health,
       loading,
@@ -83,7 +97,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshProgress,
       reload,
     }),
-    [questions, topics, progress, health, loading, error, std, setStd, sanitizers, setSanitizers, statusOf, refreshProgress, reload],
+    [allQuestions, allTopics, questions, topics, track, setTrack, progress, health, loading, error, std, setStd, sanitizers, setSanitizers, statusOf, refreshProgress, reload],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useApp } from '../state';
+import { TRACK_NAMES, type Track } from '../types';
 
 const LINKS = [
   ['/problems', 'Problems'],
@@ -34,6 +35,24 @@ function ToolchainPill() {
   );
 }
 
+function TrackSwitch() {
+  const { track, setTrack } = useApp();
+  return (
+    <div className="flex rounded-lg bg-slate-900 p-0.5 ring-1 ring-slate-700" role="group" aria-label="Track">
+      {(Object.keys(TRACK_NAMES) as Track[]).map((t) => (
+        <button
+          key={t}
+          onClick={() => setTrack(t)}
+          aria-pressed={track === t}
+          className={`rounded-md px-3 py-1 text-[12px] font-semibold ${track === t ? 'bg-sky-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+        >
+          {TRACK_NAMES[t]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Layout() {
   return (
     <div className="flex h-full flex-col">
@@ -42,6 +61,7 @@ export function Layout() {
           <span className="flex h-7 w-7 items-center justify-center rounded-md bg-sky-500 font-mono text-sm font-bold text-white">C</span>
           <span className="text-sm font-semibold text-slate-100">C Practice Simulator</span>
         </NavLink>
+        <TrackSwitch />
         <nav className="flex gap-1">
           {LINKS.map(([to, label]) => (
             <NavLink

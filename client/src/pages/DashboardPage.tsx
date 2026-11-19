@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { DifficultyBadge, VerdictBadge } from '../components/Badges';
 import { formatDuration, timeAgo } from '../hooks';
 import { useApp } from '../state';
-import type { Difficulty } from '../types';
+import { TRACK_NAMES, type Difficulty } from '../types';
 
 const DIFFS: Difficulty[] = ['Easy', 'Medium', 'Hard'];
 
@@ -86,7 +86,8 @@ function ActivityGrid({ activity }: { activity: Record<string, number> }) {
 }
 
 export function DashboardPage() {
-  const { questions, topics, progress, statusOf } = useApp();
+  const { questions, topics, progress, statusOf, track } = useApp();
+  const trackIds = useMemo(() => new Set(questions.map((q) => q.id)), [questions]);
 
   const stats = useMemo(() => {
     const solved = questions.filter((q) => statusOf(q.id) === 'solved');
@@ -107,18 +108,18 @@ export function DashboardPage() {
         })),
       };
     });
-    const subs = progress?.submissions || [];
+    const subs = (progress?.submissions || []).filter((s) => trackIds.has(s.questionId));
     const accepted = subs.filter((s) => s.verdict === 'Accepted').length;
     return { solved: solved.length, attempted: attempted.length, byDiff, byTopic, subs, accepted };
-  }, [questions, topics, progress, statusOf]);
+  }, [questions, topics, progress, statusOf, trackIds]);
 
-  const interviews = (progress?.interviews || []).filter((s) => s.finishedAt);
+  const interviews = (progress?.interviews || []).filter((s) => s.finishedAt && s.questionIds.some((id) => trackIds.has(id)));
   const best = interviews.reduce((m, s) => Math.max(m, s.score || 0), 0);
 
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-6xl space-y-6 px-6 py-6">
-        <h1 className="text-xl font-semibold text-slate-100">Dashboard</h1>
+        <h1 className="text-xl font-semibold text-slate-100">Dashboard <span className="text-slate-500">· {TRACK_NAMES[track]} track</span></h1>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Tile label="Solved" value={`${stats.solved} / ${questions.length}`} sub={`${stats.attempted} attempted, not yet solved`} />

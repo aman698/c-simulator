@@ -212,6 +212,22 @@ export function QuestionWorkspace({ id, interviewId, interviewLocked, onJudged }
         {q.progress?.status === 'solved' && <span className="text-xs font-medium text-emerald-300">✓ Solved</span>}
       </div>
 
+      {q.track === 'freertos' && (
+        <details className="mt-4 rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-slate-300">
+          <summary className="cursor-pointer font-semibold text-sky-300">FreeRTOS simulator: how time works</summary>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>Real FreeRTOS-Kernel V11.3.3 on a deterministic virtual-time port. 1 tick = 1 ms.</li>
+            <li>
+              Your code runs in <b>zero simulated time</b>. Ticks advance only while every task is blocked, or inside{' '}
+              <code>vSimBusyWork(n)</code> (CPU work of n ticks that can be preempted and time-sliced).
+            </li>
+            <li>Priorities 0-7: use 1-6 for your tasks (0 = idle, 7 = timer service task). Preemption and time slicing are on.</li>
+            <li>A task that never blocks starves the idle task, so time stops and you get Time Limit Exceeded.</li>
+            <li>Blocking APIs inside an ISR, failed <code>configASSERT</code>s and tasks that return are reported as Runtime Errors.</li>
+          </ul>
+        </details>
+      )}
+
       <Markdown className="mt-4">{q.statement_md}</Markdown>
 
       {q.constraints_md && (
