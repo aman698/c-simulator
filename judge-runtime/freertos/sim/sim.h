@@ -12,15 +12,21 @@
 
 #include "FreeRTOS.h"
 
-/* vTaskStartScheduler() returns to main() once the tick count reaches xLimit
- * (default 10000). Only non-blocking FreeRTOS calls are allowed after that. */
+/* Simulated time never passes xLimit (default 10000): vTaskStartScheduler()
+ * returns to main() at the first moment the tick count would advance beyond it,
+ * i.e. when every task is blocked at tick xLimit, or when a task is still inside
+ * vSimBusyWork() at tick xLimit. Work that the CPU reaches at tick xLimit runs;
+ * work that is still waiting for the CPU then does not. Only non-blocking FreeRTOS
+ * calls are allowed in main() after that. */
 void vSimSetTickLimit( TickType_t xLimit );
 
 /* Simulated peripheral interrupt: pxHandler( pvArg ) runs in interrupt context
  * right after the tick count becomes xTick (xTick >= 1). Handlers must use the
  * ...FromISR() APIs and request a context switch with portYIELD_FROM_ISR().
  * Several interrupts at the same tick run in the order they were scheduled.
- * Returns pdFAIL if the interrupt table (4096 entries) is full or xTick is 0. */
+ * May also be called from tasks/ISRs while the scheduler runs, for a future tick.
+ * Misuse (NULL handler, tick 0, a tick that is not in the future, more than 4096
+ * interrupts) is a fatal Runtime Error. Returns pdPASS. */
 typedef void ( * SimIsrHandler_t )( void * pvArg );
 BaseType_t xSimScheduleInterrupt( TickType_t xTick, SimIsrHandler_t pxHandler, void * pvArg );
 

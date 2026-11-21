@@ -1,0 +1,10 @@
+[t=5] got 7
+[t=5] lo
+[t=10] tick
+[t=12] got 9
+[t=18] lo
+[t=20] tick
+[t=30] tick
+[t=33] lo
+[t=40] tick
+done t=40

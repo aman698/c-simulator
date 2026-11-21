@@ -27,7 +27,7 @@ typedef struct SimThread
     pthread_t xThread;
     pthread_cond_t xCond;
     int iRun;          /* 1 while this thread owns the CPU */
-    int iExit;         /* 1 when the task was deleted and the thread must end */
+    int iExit;         /* 1 when the task was deleted: the thread parks forever */
     TaskFunction_t pxCode;
     void * pvParams;
 } SimThread_t;
@@ -59,12 +59,13 @@ static void * prvThreadMain( void * pvArg )
         pthread_cond_wait( &pxThread->xCond, &xLock );
     }
     iExit = pxThread->iExit;
-    pthread_mutex_unlock( &xLock );
 
-    if( iExit )
+    while( iExit ) /* deleted before it ever ran: park (see prvParkForever) */
     {
-        return NULL;
+        pthread_cond_wait( &pxThread->xCond, &xLock );
     }
+
+    pthread_mutex_unlock( &xLock );
 
     pxThread->pxCode( pxThread->pvParams );
 
@@ -101,6 +102,19 @@ StackType_t * pxPortInitialiseStack( StackType_t * pxTopOfStack,
     return pxTopOfStack;
 }
 
+/* A deleted task's host thread never runs again. It is parked instead of being
+ * terminated: pthread_exit() from inside a blocked call breaks AddressSanitizer's
+ * thread teardown. Parked threads cost only virtual memory and end with the process. */
+static void prvParkForever( SimThread_t * pxThread )
+{
+    pthread_mutex_lock( &xLock );
+
+    for( ; ; )
+    {
+        pthread_cond_wait( &pxThread->xCond, &xLock );
+    }
+}
+
 /* Hand the CPU from pxPrev to whatever task the kernel selected as current. */
 static void prvSwitchFrom( SimThread_t * pxPrev )
 {
@@ -127,7 +141,7 @@ static void prvSwitchFrom( SimThread_t * pxPrev )
 
     if( iExit )
     {
-        pthread_exit( NULL );
+        prvParkForever( pxPrev );
     }
 }
 
@@ -225,11 +239,24 @@ UBaseType_t uxPortSetInterruptMask( void )
 void vPortClearInterruptMask( UBaseType_t uxMask )
 {
     iInterruptsMasked = ( int ) uxMask;
+    prvRunPendingYield(); /* a pended switch fires once interrupts are unmasked (task context only) */
 }
 
 BaseType_t xPortIsInsideInterrupt( void )
 {
     return ( BaseType_t ) iInISR;
+}
+
+void vSimCheckNotInISR( const char * pcApi )
+{
+    char cMessage[ 200 ];
+
+    if( iInISR )
+    {
+        snprintf( cMessage, sizeof( cMessage ),
+                  "%s() was called from an interrupt handler. Use the ...FromISR() version and portYIELD_FROM_ISR()", pcApi );
+        vSimFatal( cMessage );
+    }
 }
 
 /* One tick interrupt plus any simulated peripheral interrupts scheduled for the
@@ -243,6 +270,11 @@ void vPortSimTick( void )
     if( iInISR )
     {
         vSimFatal( "vSimBusyWork() cannot be used inside an interrupt handler" );
+    }
+
+    if( ( uxCriticalNesting > 0 ) || iInterruptsMasked )
+    {
+        vSimFatal( "vSimBusyWork() inside a critical section / with interrupts disabled: the tick interrupt is masked there, keep critical sections short" );
     }
 
     iInISR = 1;
@@ -291,13 +323,8 @@ void vPortSimEnd( void )
     pxSelf->iRun = 0;
     pthread_cond_signal( &xMainCond );
 
-    while( !pxSelf->iExit )
-    {
-        pthread_cond_wait( &pxSelf->xCond, &xLock );
-    }
-
     pthread_mutex_unlock( &xLock );
-    pthread_exit( NULL );
+    prvParkForever( pxSelf ); /* main() returns and the process exits */
 }
 
 void vPortEndScheduler( void )
@@ -305,7 +332,9 @@ void vPortEndScheduler( void )
     vPortSimEnd();
 }
 
-/* The kernel frees a deleted task's TCB: stop its (parked) host thread first. */
+/* The kernel frees a deleted task's TCB. Its host thread is (or will be) parked in
+ * prvSwitchFrom(); mark it so it never takes the CPU again. The SimThread_t stays
+ * allocated because the parked thread still uses its condition variable. */
 void vPortCleanUpTCB( void * pxTCB )
 {
     SimThread_t * pxThread = prvThreadOf( ( TaskHandle_t ) pxTCB );
@@ -314,7 +343,4 @@ void vPortCleanUpTCB( void * pxTCB )
     pxThread->iExit = 1;
     pthread_cond_signal( &pxThread->xCond );
     pthread_mutex_unlock( &xLock );
-    pthread_join( pxThread->xThread, NULL );
-    pthread_cond_destroy( &pxThread->xCond );
-    free( pxThread );
 }

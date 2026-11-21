@@ -13,7 +13,8 @@
     "build:questions": "node scripts/build_questions.js",
     "validate": "node scripts/build_questions.js --strict && node scripts/validate_questions.js",
     "q": "node scripts/qtool.js",
-    "typecheck": "tsc -p client/tsconfig.json --noEmit"
+    "typecheck": "tsc -p client/tsconfig.json --noEmit",
+    "test:rtos": "node scripts/test_freertos_sim.js"
   },
   "engines": {
     "node": ">=20.19"

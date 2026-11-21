@@ -95,4 +95,31 @@
 void vSimAssertFailed( const char * pcExpr, const char * pcFile, int iLine );
 #define configASSERT( x )    do { if( !( x ) ) vSimAssertFailed( #x, __FILE__, __LINE__ ); } while( 0 )
 
+/* Task-only APIs called from a simulated interrupt are a Runtime Error (real ports would
+ * corrupt the scheduler or hard-fault). Checked on entry, even when the call would not block. */
+void vSimCheckNotInISR( const char * pcApi );
+#define traceENTER_xQueueGenericSend( ... )    vSimCheckNotInISR( "xQueueGenericSend" )
+#define traceENTER_xQueueReceive( ... )    vSimCheckNotInISR( "xQueueReceive" )
+#define traceENTER_xQueuePeek( ... )    vSimCheckNotInISR( "xQueuePeek" )
+#define traceENTER_xQueueSemaphoreTake( ... )    vSimCheckNotInISR( "xQueueSemaphoreTake" )
+#define traceENTER_xQueueTakeMutexRecursive( ... )    vSimCheckNotInISR( "xQueueTakeMutexRecursive" )
+#define traceENTER_xQueueGiveMutexRecursive( ... )    vSimCheckNotInISR( "xQueueGiveMutexRecursive" )
+#define traceENTER_xQueueSelectFromSet( ... )    vSimCheckNotInISR( "xQueueSelectFromSet" )
+#define traceENTER_vTaskDelay( ... )    vSimCheckNotInISR( "vTaskDelay" )
+#define traceENTER_xTaskDelayUntil( ... )    vSimCheckNotInISR( "xTaskDelayUntil" )
+#define traceENTER_vTaskSuspend( ... )    vSimCheckNotInISR( "vTaskSuspend" )
+#define traceENTER_vTaskResume( ... )    vSimCheckNotInISR( "vTaskResume" )
+#define traceENTER_vTaskDelete( ... )    vSimCheckNotInISR( "vTaskDelete" )
+#define traceENTER_vTaskPrioritySet( ... )    vSimCheckNotInISR( "vTaskPrioritySet" )
+#define traceENTER_xEventGroupWaitBits( ... )    vSimCheckNotInISR( "xEventGroupWaitBits" )
+#define traceENTER_xEventGroupSetBits( ... )    vSimCheckNotInISR( "xEventGroupSetBits" )
+#define traceENTER_xEventGroupClearBits( ... )    vSimCheckNotInISR( "xEventGroupClearBits" )
+#define traceENTER_xEventGroupSync( ... )    vSimCheckNotInISR( "xEventGroupSync" )
+#define traceENTER_xTaskGenericNotify( ... )    vSimCheckNotInISR( "xTaskGenericNotify" )
+#define traceENTER_xTaskGenericNotifyWait( ... )    vSimCheckNotInISR( "xTaskGenericNotifyWait" )
+#define traceENTER_ulTaskGenericNotifyTake( ... )    vSimCheckNotInISR( "ulTaskGenericNotifyTake" )
+#define traceENTER_xStreamBufferSend( ... )    vSimCheckNotInISR( "xStreamBufferSend" )
+#define traceENTER_xStreamBufferReceive( ... )    vSimCheckNotInISR( "xStreamBufferReceive" )
+#define traceENTER_xTimerGenericCommandFromTask( ... )    vSimCheckNotInISR( "xTimerGenericCommandFromTask" )
+
 #endif /* FREERTOS_CONFIG_H */

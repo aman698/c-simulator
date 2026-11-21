@@ -34,11 +34,31 @@ void vSimSetTickLimit( TickType_t xLimit )
 
 BaseType_t xSimScheduleInterrupt( TickType_t xTick, SimIsrHandler_t pxHandler, void * pvArg )
 {
+    char cMessage[ 200 ];
     size_t i;
 
-    if( ( xTick == 0 ) || ( pxHandler == NULL ) || ( uxEventCount >= SIM_MAX_INTERRUPTS ) )
+    /* Harness bugs must not pass silently: every misuse is a readable fatal error. */
+    if( pxHandler == NULL )
     {
-        return pdFAIL;
+        vSimFatal( "xSimScheduleInterrupt(): the handler is NULL" );
+    }
+
+    if( xTick == 0 )
+    {
+        vSimFatal( "xSimScheduleInterrupt(): tick 0 is not allowed, the first interrupt tick is 1" );
+    }
+
+    if( ( xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED ) && ( xTick <= xTaskGetTickCount() ) )
+    {
+        snprintf( cMessage, sizeof( cMessage ),
+                  "xSimScheduleInterrupt(): tick %u is not in the future (the tick count is already %u)",
+                  ( unsigned ) xTick, ( unsigned ) xTaskGetTickCount() );
+        vSimFatal( cMessage );
+    }
+
+    if( uxEventCount >= SIM_MAX_INTERRUPTS )
+    {
+        vSimFatal( "xSimScheduleInterrupt(): more than 4096 interrupts scheduled" );
     }
 
     /* keep the table sorted by tick, FIFO among equal ticks (stable insertion) */
@@ -58,12 +78,6 @@ BaseType_t xSimScheduleInterrupt( TickType_t xTick, SimIsrHandler_t pxHandler, v
 
 void vSimRunInterrupts( TickType_t xNow )
 {
-    /* drop events scheduled in the past (e.g. tick already passed when scheduled) */
-    while( ( uxNextEvent < uxEventCount ) && ( xEvents[ uxNextEvent ].xTick < xNow ) )
-    {
-        uxNextEvent++;
-    }
-
     while( ( uxNextEvent < uxEventCount ) && ( xEvents[ uxNextEvent ].xTick == xNow ) )
     {
         SimEvent_t xEv = xEvents[ uxNextEvent++ ];

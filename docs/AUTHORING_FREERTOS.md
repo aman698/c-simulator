@@ -45,11 +45,16 @@ deterministic **virtual-time simulator port** (`judge-runtime/freertos/sim`). In
   solution 3 times and requires identical output.
 
 **Control API (`sim.h`)**
-- `vSimSetTickLimit(N)`: `vTaskStartScheduler()` **returns** to `main()` when the tick count reaches `N`. Work
-  that becomes ready at tick `N` still runs before it returns. Default `N` = 10000. After it returns, `main()`
-  may only call **non-blocking** APIs (`uxQueueMessagesWaiting`, `xPortGetFreeHeapSize`, reading globals, ...).
+- `vSimSetTickLimit(N)`: simulated time never passes `N` (default 10000). `vTaskStartScheduler()` **returns** to
+  `main()` at the first moment the tick count would advance beyond `N`: when every task is blocked at tick `N`,
+  or when a task is still inside `vSimBusyWork()` at tick `N`. Work the CPU reaches at tick `N` runs (e.g. a
+  higher-priority task woken at `N`); work still waiting for the CPU at that moment does not. Avoid scenarios
+  where that difference decides the expected output. After it returns, `main()` may only call
+  **non-blocking** APIs (`uxQueueMessagesWaiting`, `xPortGetFreeHeapSize`, reading globals, ...).
 - `xSimScheduleInterrupt(tick, handler, arg)`: run `handler(arg)` **in interrupt context** right after the tick
-  count becomes `tick` (`tick >= 1`). Handlers must use `...FromISR()` APIs and `portYIELD_FROM_ISR()`. Several
+  count becomes `tick` (`tick >= 1`). Usually called from `main()` before the scheduler starts; from a task or
+  ISR the tick must be in the future. A NULL handler, tick 0, a past tick or more than 4096 interrupts is a
+  fatal error (so a harness bug can never silently drop an interrupt). Handlers must use `...FromISR()` APIs and `portYIELD_FROM_ISR()`. Several
   interrupts at one tick run in scheduling order. If a handler wakes a higher-priority task and calls
   `portYIELD_FROM_ISR(pdTRUE)`, that task runs at the same tick. Without the yield, it runs at the next tick
   (exactly the latency bug you see on real hardware).
@@ -62,8 +67,10 @@ deterministic **virtual-time simulator port** (`judge-runtime/freertos/sim`). In
 - heap_4 with `configTOTAL_HEAP_SIZE` = 128 KB, static and dynamic allocation.
 - Enabled: mutexes, recursive mutexes, counting semaphores, queue sets, event groups, task notifications
   (3 indexes), stream/message buffers, software timers (queue length 16), `xTaskAbortDelay`, `eTaskGetState`.
-- `configASSERT` failures, blocking calls inside an ISR, and task functions that return all produce a Runtime
-  Error with a readable `FreeRTOS: ...` message.
+- These all produce a Runtime Error with a readable `FreeRTOS: ...` message: `configASSERT` failures, any
+  task-only API called from an ISR (`xQueueSend`, `xSemaphoreGive`, `xEventGroupSetBits`, `xTaskNotify`,
+  `vTaskDelay`, ... even with timeout 0), `vSimBusyWork()` inside a critical section or ISR, and task
+  functions that return.
 
 **Not meaningful in the simulator (do not print or test):**
 - `uxTaskGetStackHighWaterMark` (tasks run on host threads);
@@ -117,5 +124,7 @@ npm run q -- check questions_src/rtos-tasks/RTK-E-01.q --cc clang # one file (cl
 node scripts/validate_questions.js --src --topic rtos-tasks --jobs 1
 node scripts/validate_questions.js --src --topic rtos-tasks --jobs 1 --cc clang
 ```
+
+Simulator regression tests (run after any change in `judge-runtime/freertos/sim`): `npm run test:rtos`.
 
 The first compile of a session builds the kernel (a few seconds) and caches it in `<tmp>/csim-freertos/`.

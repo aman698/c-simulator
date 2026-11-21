@@ -1,0 +1,4 @@
+[t=10] hi
+[t=18] busy start
+[t=20] hi
+end t=20
