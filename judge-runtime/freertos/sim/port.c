@@ -279,7 +279,7 @@ void vPortSimTick( void )
 
     iInISR = 1;
     xSwitch = xTaskIncrementTick();
-    vSimRunInterrupts( xTaskGetTickCountFromISR() );
+    vSimRunInterrupts();
     iInISR = 0;
 
     if( xSwitch != pdFALSE )

@@ -59,6 +59,9 @@ deterministic **virtual-time simulator port** (`judge-runtime/freertos/sim`). In
   `portYIELD_FROM_ISR(pdTRUE)`, that task runs at the same tick. Without the yield, it runs at the next tick
   (exactly the latency bug you see on real hardware).
 - `vSimBusyWork(n)`: see above (never inside an ISR).
+- Interrupts and the tick limit follow the simulated **hardware clock**, which advances on every tick, even while
+  the scheduler is suspended (`vTaskSuspendAll()`). During suspension the kernel only pends ticks, so
+  `xTaskGetTickCount()` / `xTaskGetTickCountFromISR()` lag behind until `xTaskResumeAll()`, exactly as on target.
 - `vSimSetMallocFailedHandler(fn)`: called from `vApplicationMallocFailedHook`.
 
 **Fixed configuration** (`judge-runtime/freertos/sim/FreeRTOSConfig.h`)

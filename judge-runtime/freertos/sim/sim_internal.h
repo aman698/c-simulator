@@ -6,7 +6,7 @@
 
 void vPortSimTick( void );
 void vPortSimEnd( void );
-void vSimRunInterrupts( TickType_t xNow );
+void vSimRunInterrupts( void );   /* advances hardware time by one tick, runs due interrupts */
 void vSimFatal( const char * pcMessage );
 
 #endif

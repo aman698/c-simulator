@@ -25,6 +25,13 @@ static SimEvent_t xEvents[ SIM_MAX_INTERRUPTS ];
 static size_t uxEventCount = 0;
 static size_t uxNextEvent = 0;
 static TickType_t xTickLimit = 10000;
+
+/* Hardware time: advanced once per simulated tick interrupt, even while the
+ * scheduler is suspended (vTaskSuspendAll), when the kernel only pends ticks and
+ * xTaskGetTickCount() lags behind. Interrupts and the tick limit follow this
+ * clock, like a real timer peripheral. Outside scheduler suspension it always
+ * equals the tick count. */
+static TickType_t xSimTime = 0;
 static void ( * pxMallocFailedHandler )( void ) = NULL;
 
 void vSimSetTickLimit( TickType_t xLimit )
@@ -48,11 +55,11 @@ BaseType_t xSimScheduleInterrupt( TickType_t xTick, SimIsrHandler_t pxHandler, v
         vSimFatal( "xSimScheduleInterrupt(): tick 0 is not allowed, the first interrupt tick is 1" );
     }
 
-    if( ( xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED ) && ( xTick <= xTaskGetTickCount() ) )
+    if( ( xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED ) && ( xTick <= xSimTime ) )
     {
         snprintf( cMessage, sizeof( cMessage ),
                   "xSimScheduleInterrupt(): tick %u is not in the future (the tick count is already %u)",
-                  ( unsigned ) xTick, ( unsigned ) xTaskGetTickCount() );
+                  ( unsigned ) xTick, ( unsigned ) xSimTime );
         vSimFatal( cMessage );
     }
 
@@ -76,9 +83,12 @@ BaseType_t xSimScheduleInterrupt( TickType_t xTick, SimIsrHandler_t pxHandler, v
     return pdPASS;
 }
 
-void vSimRunInterrupts( TickType_t xNow )
+void vSimRunInterrupts( void )
 {
-    while( ( uxNextEvent < uxEventCount ) && ( xEvents[ uxNextEvent ].xTick == xNow ) )
+    xSimTime++;
+
+    /* every tick is visited once, so "<=" only matters defensively */
+    while( ( uxNextEvent < uxEventCount ) && ( xEvents[ uxNextEvent ].xTick <= xSimTime ) )
     {
         SimEvent_t xEv = xEvents[ uxNextEvent++ ];
         xEv.pxHandler( xEv.pvArg );
@@ -89,7 +99,7 @@ void vSimRunInterrupts( TickType_t xNow )
  * when simulated time may advance by one tick. */
 void vApplicationIdleHook( void )
 {
-    if( xTaskGetTickCount() >= xTickLimit )
+    if( xSimTime >= xTickLimit )
     {
         vPortSimEnd();
     }
@@ -101,7 +111,7 @@ void vSimBusyWork( TickType_t xTicks )
 {
     while( xTicks-- > 0 )
     {
-        if( xTaskGetTickCount() >= xTickLimit )
+        if( xSimTime >= xTickLimit )
         {
             vPortSimEnd();
         }
