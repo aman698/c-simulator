@@ -1,8 +1,12 @@
 # C Practice Simulator
 
 A LeetCode-style, fully local practice app for **embedded / automotive C interviews**. It has a real `gcc` judge with
-AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer, and a bank of **240 verified questions**
-(8 topics × 30, each topic 10 Easy / 10 Medium / 10 Hard).
+AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer, and a bank of **320 verified questions** in two
+tracks:
+
+- **C track:** 240 questions, 8 topics × 30 (10 Easy / 10 Medium / 10 Hard each).
+- **FreeRTOS track:** 80 questions, 8 topics × 10 (3 Easy / 4 Medium / 3 Hard each). Submissions run on the real
+  FreeRTOS-Kernel V11.3.3 inside a deterministic virtual-time simulator.
 
 ![Problem page](docs/screenshots/01-problem.png)
 
@@ -40,7 +44,13 @@ AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer, and a bank of **
   10 submissions, and interview history.
 - **Interview Mode.** Three random questions (1 Easy, 1 Medium, 1 Hard) from the topics you choose, a 45-minute
   timer, no hints, and a score out of 100 at the end (20/30/50 points, with partial credit for tests passed).
-- **Playground.** A blank editor with stdin for free experimentation.
+- **FreeRTOS track.** A header switch toggles between the C and FreeRTOS tracks. FreeRTOS questions compile your
+  code against the real kernel (tasks, queues, semaphores, mutexes, event groups, notifications, timers,
+  stream/message buffers) and a simulator port with virtual time (1 tick = 1 ms). Interrupts are injected at exact
+  ticks, and CPU-bound work is simulated with `vSimBusyWork()`, so preemption, time slicing, priority inversion,
+  ISR latency and deadline misses are all observable. Every run is deterministic.
+- **Playground.** A blank editor with stdin for free experimentation, with a *FreeRTOS kernel* option and a
+  ready-made producer/consumer/ISR example.
 - **Shortcuts.** <kbd>Ctrl</kbd>+<kbd>Enter</kbd> = Run, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> = Submit.
 
 ## Quick start
@@ -114,7 +124,7 @@ npm start          # builds the UI into dist/ and serves UI + API on http://loca
 | Step | What happens |
 |---|---|
 | Assemble | FUNCTION/FIND_THE_BUG questions with a hidden harness get your code inserted at `/*USER_CODE*/`. `#line` directives keep compiler errors and sanitizer stack traces pointing at **your** line numbers. |
-| Compile | Exact judge flags (above) plus `-lm`, in a fresh temp directory (deleted afterwards) or a Docker container. |
+| Compile | Exact judge flags (above) plus `-lm`, in a fresh temp directory (deleted afterwards) or a Docker container. FreeRTOS questions also link the kernel + simulator port (compiled once per toolchain and cached; kernel headers are system headers, so their warnings are not yours) and `-pthread`. |
 | Run | Each test gets its stdin, a 2 s wall-clock limit (process-group kill), a 1 MiB stdout cap, and a memory limit: `ulimit -v 256 MB` natively without sanitizers, ASan `hard_rss_limit_mb` with sanitizers, or Docker `--memory=128m`. |
 | Compare | CRLF→LF, trailing spaces on every line and trailing blank lines are ignored. **Leading spaces matter** (patterns!). |
 | Verdict | TLE → Runtime Error (signal, ASan/UBSan report, non-zero exit) → Wrong Answer → Memory Leak → Accepted, decided per test. |
@@ -145,7 +155,7 @@ Environment variables: `PORT` (API, default 3001), `CC` (compiler), `JUDGE_MODE`
 | Dynamic Memory | 30 | 10/10/10 | 19 |
 | **Total** | **240** | **80/80/80** | **161** |
 
-Every topic has about 18 CODE/FUNCTION, 6 PREDICT_OUTPUT and 6 FIND_THE_BUG questions. At least 30% are
+Every C topic has about 18 CODE/FUNCTION, 6 PREDICT_OUTPUT and 6 FIND_THE_BUG questions. At least 30% are
 embedded/automotive-flavoured, for example:
 
 - UART ring buffers, ADC filters, sensor calibration lookup tables;
@@ -158,11 +168,27 @@ Each question follows the strict JSON schema in `questions/<topic>.json`. Every 
 question has at least 2 sample and 5 hidden tests covering edge cases (n = 0/1, max size, negatives,
 `INT_MIN`/`INT_MAX`, all-equal values, NULL, ...).
 
+**FreeRTOS track** (all FUNCTION questions: you write the tasks and RTOS code, a hidden harness builds the scenario,
+injects interrupts, runs the scheduler and checks behaviour, for example `LATE`, `RACE`, `LEAK` or `TORN` verdicts):
+
+| Topic | Questions | Easy / Medium / Hard | Examples |
+|---|---|---|---|
+| Tasks & Scheduling | 10 | 3/4/3 | vTaskDelayUntil drift and catch-up, xTaskAbortDelay, rate-monotonic + response-time analysis, hung-task supervisor, aging |
+| Queues | 10 | 3/4/3 | producer/consumer, SendToFront from ISR, queue sets, overwrite mailbox, RPC with reply queues, zero-copy pool |
+| Semaphores & Mutexes | 10 | 3/4/3 | priority inversion vs inheritance, recursive mutex, reader-writer lock, dining philosophers, priority ceiling |
+| Event Groups & Notifications | 10 | 3/4/3 | wait-all init bits, xEventGroupSync, indexed notifications, eSetValueWithoutOverwrite overrun detection |
+| Software Timers | 10 | 3/4/3 | debounce with xTimerResetFromISR, xTimerPendFunctionCall, timer command-queue limits, exponential backoff |
+| Interrupts & ISRs | 10 | 3/4/3 | portYIELD_FROM_ISR latency, stream-buffer UART RX, burst loss, consistent snapshots, ping-pong DMA, CAN RX |
+| RTOS Memory Management | 10 | 3/4/3 | static allocation, heap deltas, O(1) block pools, malloc-failed hook, ref-counted buffers, fully static system |
+| RTOS Design Patterns | 10 | 3/4/3 | gatekeeper, active object, pub/sub, token bucket, mode manager, worker pool, AUTOSAR-style 1/10/100 ms runnables |
+| **Total** | **80** | **24/32/24** | |
+
 ### Adding a question
 
 Questions are authored as plain-text `.q` files in `questions_src/<topic>/` (no JSON escaping of C code), and
 `npm run build:questions` generates `questions/*.json`. The full format and rules are in
-**[docs/AUTHORING.md](docs/AUTHORING.md)**.
+**[docs/AUTHORING.md](docs/AUTHORING.md)**. FreeRTOS questions also follow
+**[docs/AUTHORING_FREERTOS.md](docs/AUTHORING_FREERTOS.md)** (simulator time model, harness rules).
 
 ```bash
 npm run q -- new pointers PTR-H-11 FUNCTION "My new question"   # scaffold
@@ -175,7 +201,8 @@ npm run validate                                                 # validate the 
 
 `scripts/validate_questions.js` uses the **same judge code as the app**. For every question it:
 
-1. checks the JSON schema and unique IDs, 30 questions (10/10/10) per topic, the type mix, and ≥ 30% `embedded`;
+1. checks the JSON schema and unique IDs, and the per-track bank rules: C topics need 30 questions (10/10/10),
+   the type mix and ≥ 30% `embedded`; FreeRTOS topics need 10 questions (3/4/3), CODE/FUNCTION only;
 2. lints for portability (no `long`, no POSIX-only calls hidden by `-std=c11`, no `%p`, no `rand`, ...);
 3. compiles `solution_code` (inside the harness for FUNCTION) with the exact judge flags and **requires zero
    warnings**;
@@ -184,7 +211,13 @@ npm run validate                                                 # validate the 
 5. for **FIND_THE_BUG**, requires that the buggy starter code compiles and **fails at least one test**;
 6. for **PREDICT_OUTPUT**, compiles the snippet and requires its real output to equal `predict_answer`. For
    *Compile Error* answers it requires that compilation fails;
-7. checks that CODE/FUNCTION starter templates compile.
+7. checks that CODE/FUNCTION starter templates compile;
+8. for **FreeRTOS** questions, runs the solution **three times** and requires byte-identical output.
+
+The simulator itself has regression tests (`npm run test:rtos`, `judge-runtime/freertos/tests/`): preemption,
+time slicing, ISR wake-up latency, tick limit, task deletion, scheduler suspension, and the readable fatal errors
+(task-only API from an ISR, a task function that returns, a past interrupt tick, busy work in a critical
+section, starvation → TLE).
 
 Final validator output:
 
@@ -488,9 +521,27 @@ $ node scripts/validate_questions.js --cc clang
 240/240 questions valid
 ```
 
-**On Linux/WSL2** (gcc with ASan + UBSan + LeakSanitizer, the primary target), run `npm run validate` once after
-setup to confirm on your machine. The bank was written to the portability rules above so that it behaves the same
-on Linux and Windows, but this build machine had no Linux environment to run that pass.
+**On Linux** (gcc with ASan + UBSan + LeakSanitizer, the primary target), the whole bank, both tracks, passes:
+
+```
+$ npm run validate
+  toolchain : gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0 [native, x86_64-linux-gnu]
+  sanitizers: AddressSanitizer + UndefinedBehaviorSanitizer + LeakSanitizer
+...
+  Tasks & Scheduling  10  E/M/H 3/4/3  CODE 0 FUNCTION 10 PREDICT 0 BUG 0  embedded 10
+  Queues             10  E/M/H 3/4/3  CODE 0 FUNCTION 10 PREDICT 0 BUG 0  embedded 10
+  Semaphores & Mutexes  10  E/M/H 3/4/3  CODE 0 FUNCTION 10 PREDICT 0 BUG 0  embedded 10
+  Event Groups & Notifications  10  E/M/H 3/4/3  CODE 0 FUNCTION 10 PREDICT 0 BUG 0  embedded 10
+  Software Timers    10  E/M/H 3/4/3  CODE 0 FUNCTION 10 PREDICT 0 BUG 0  embedded 10
+  Interrupts & ISRs  10  E/M/H 3/4/3  CODE 0 FUNCTION 10 PREDICT 0 BUG 0  embedded 10
+  RTOS Memory Management  10  E/M/H 3/4/3  CODE 0 FUNCTION 10 PREDICT 0 BUG 0  embedded 10
+  RTOS Design Patterns  10  E/M/H 3/4/3  CODE 0 FUNCTION 10 PREDICT 0 BUG 0  embedded 10
+
+Time: 26.0 s
+320/320 questions valid
+```
+
+The FreeRTOS track has so far been validated with gcc on Linux only, not yet with Windows MinGW or clang.
 
 ## Project layout
 
@@ -499,10 +550,11 @@ client/                 React + Vite + TypeScript + Tailwind + Monaco UI
 server/                 Express API (index.js), progress store, question loader
 server/judge/           toolchain detection + compile/run/verdict engine (shared with the validator)
 judge-runtime/          portable heap checker used when LeakSanitizer is unavailable
+judge-runtime/freertos/ FreeRTOS-Kernel V11.3.3 (MIT), the virtual-time simulator port, and its regression tests
 questions/              the bank: one strict-schema JSON file per topic (generated, committed)
 questions_src/          .q sources of every question
 scripts/                validate_questions.js, build_questions.js, qtool.js, setup_windows_toolchain.js, screenshots.js
-docs/                   AUTHORING.md, screenshots
+docs/                   AUTHORING.md, AUTHORING_FREERTOS.md, screenshots
 data/                   your progress (progress.json, git-ignored)
 ```
 
@@ -571,6 +623,26 @@ The brief asked for sensible decisions to be made and recorded instead of asked.
     against independent JavaScript implementations.
 - **Large inputs:** big test sizes are produced inside the hidden harness from a seed (a deterministic LCG), so
   the JSON stays small while O(n²) solutions still hit the time limit.
+
+**FreeRTOS track**
+- **Real kernel, simulated CPU.** Questions run on the unmodified FreeRTOS-Kernel V11.3.3. Only the port is
+  custom: each task is a host thread, but exactly one runs at a time and control changes hands only at kernel
+  scheduling points, so runs are deterministic on every machine.
+- **Virtual time.** Code takes zero ticks. Time advances only when every task is blocked (in the idle task) or
+  inside `vSimBusyWork()`. A 10-second scenario therefore runs in milliseconds, and a task that never blocks
+  stops time and hits the time limit with an explanatory message.
+- **Tie rule.** When CPU work ends exactly on the tick that wakes a higher-priority task, the tick interrupt
+  preempts first. Statements spell this out wherever it affects the output.
+- **Misuse is never silent.** Task-only APIs called from an ISR, a returning task function, an interrupt
+  scheduled in the past, and busy work inside a critical section are Runtime Errors with a `FreeRTOS: ...`
+  message.
+- **Not simulated:** stack high-water marks, run-time stats, tickless idle, SMP and MPU. Absolute heap numbers
+  are never part of an expected output; heap deltas are.
+- **Authoring.** The FreeRTOS questions were written by several parallel authoring agents. Each one hand-traced
+  the sample outputs, reviewed every generated output against FreeRTOS rules, and ran typical wrong solutions to
+  confirm the harness catches them. Every mismatch found on the way was traced to the author, apart from two
+  simulator bugs, which were fixed and covered by regression tests: `vTaskDelete` crashing under ASan, and
+  interrupts lost during `vTaskSuspendAll()`.
 
 **This build machine (Windows 10)**
 - **Toolchain:** the machine had no WSL distro, Docker, Node.js or gcc, and no admin rights for installing
